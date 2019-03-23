@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2017-2018 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2016 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -35,89 +35,40 @@ namespace Anvil
     {
     public:
         /* Public functions */
+        WindowWin3264(const std::string&     title,
+                      unsigned int           width,
+                      unsigned int           height,
+                      PFNPRESENTCALLBACKPROC present_callback_func_ptr,
+                      void*                  present_callback_func_user_arg);
 
-        /* Creates a window wrapper instance by opening a new system window.
-         *
-         * NOTE: This function resets that last system error assigned to the calling thread.
-         *
-         * @param in_title                 Title to use for the window.
-         * @param in_width                 New window's width. Must not be 0.
-         * @param in_height                New window's height. Must not be 0.
-         * @param in_closable              Determines if window's close button should be greyed out, prohibiting
-         *                                 the user from being able to destroy the window on their own.
-         * @param in_present_callback_func Func pointer to a function which is going to render frame contents to
-         *                                 the swapchain image. Must not be null.
-         * @param in_visible               Should the window be made visible at creation time?
-         *
-         * @return New Anvil::Window instance if successful, or null otherwise.
-         */
-        static Anvil::WindowUniquePtr create(const std::string&             in_title,
-                                             unsigned int                   in_width,
-                                             unsigned int                   in_height,
-                                             bool                           in_closable,
-                                             Anvil::PresentCallbackFunction in_present_callback_func,
-                                             bool                           in_visible);
+        virtual void            close();
+        virtual void            run();
 
-        /* Creates a window wrapper instance from an existing window handle.
-         *
-         * It is assumed that:
-         * 1) the application is going to run the message pump on its own.
-         * 2) the application is going to explicitly call the presentation callback function at expose/paint/etc. system requests.
-         * 3) the application only needs the wrapper instance for interaction with other Anvil wrappers (such as swapchains).
-         *
-         *
-         * @param in_window_handle Existing, valid window handle.
-         *
-         * @return New Anvil::Window instance if successful, or null otherwise.
-         */
-        static Anvil::WindowUniquePtr create(HWND in_window_handle);
-
-        virtual ~WindowWin3264(){ /* Stub */ }
-
-        virtual void close();
-        virtual void run();
-
-        /* Returns window's platform */
-        WindowPlatform get_platform() const
+        /* Tells if it's a dummy window (offscreen rendering thus no WSI/swapchain involved) */
+        virtual bool            is_dummy()
         {
-            return WINDOW_PLATFORM_SYSTEM;
+            return false;
         }
 
-        /* This function should never be called under Windows */
-        virtual void* get_connection() const
+        /* This function should never be called under windows */
+        virtual void*           get_connection() const
         {
-            anvil_assert_fail();
+            anvil_assert(0);
 
             return nullptr;
         }
 
-        /** Changes the window title.
-         *
-         *  @param in_new_title Null-terminated string, holding the new title.
-         */
-        void set_title(const std::string& in_new_title) override;
-
     private:
         /* Private functions */
-
-        WindowWin3264(const std::string&             in_title,
-                      unsigned int                   in_width,
-                      unsigned int                   in_height,
-                      bool                           in_closable,
-                      Anvil::PresentCallbackFunction in_present_callback_func);
-        WindowWin3264(HWND                           in_handle,
-                      const std::string&             in_title,
-                      unsigned int                   in_width,
-                      unsigned int                   in_height,
-                      PresentCallbackFunction        in_present_callback_func);
+        virtual                ~WindowWin3264(){ /* Stub */ }
 
         /** Creates a new system window and prepares it for usage. */
-        bool init(const bool& in_visible);
+        void                    init();
 
-        static LRESULT CALLBACK msg_callback_pfn_proc(HWND   in_window_handle,
-                                                      UINT   in_message_id,
-                                                      WPARAM in_param_wide,
-                                                      LPARAM in_param_long);
+        static LRESULT CALLBACK msg_callback_pfn_proc(HWND   window_handle,
+                                                      UINT   message_id,
+                                                      WPARAM param_wide,
+                                                      LPARAM param_long);
 
         /* Private variables */
     };

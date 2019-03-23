@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2017-2018 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2016 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -33,70 +33,98 @@
 #ifndef WRAPPERS_BUFFER_H
 #define WRAPPERS_BUFFER_H
 
-#include "misc/callbacks.h"
-#include "misc/debug_marker.h"
-#include "misc/mt_safety.h"
+#include "misc/ref_counter.h"
 #include "misc/types.h"
-#include "misc/page_tracker.h"
 
 namespace Anvil
 {
-    /* Enumerates available buffer call-back types.*/
-    enum BufferCallbackID
-    {
-        /* Call-back issued by sparse buffer instances whenever the buffer needs to check if
-         * there are any pending alloc operations for this instance. Any recipient should set
-         * callback_arg::result to true in case a bake operation *would* assign new pages to
-         * the buffer instance. If no allocs are scheduled, the bool value MUST be left
-         * untouched.
-         *
-         * This call-back is needed for memory allocator to support implicit bake operations
-         * for sparse images.
-         *
-         * callback_arg: Pointer to IsBufferMemoryAllocPendingQueryCallbackArgument instance.
-         **/
-        BUFFER_CALLBACK_ID_IS_ALLOC_PENDING,
-
-        /* Call-back issued when no memory block is assigned to the buffer wrapper instance and
-         * someone has just requested it.
-         *
-         * This call-back is needed by memory allocator in order to support implicit bake operations.
-         *
-         * callback_arg: Pointer to OnMemoryBlockNeededForBufferCallbackArgument instance.
-         **/
-        BUFFER_CALLBACK_ID_MEMORY_BLOCK_NEEDED,
-
-        /* Always last */
-        BUFFER_CALLBACK_ID_COUNT
-    };
-
-    class Buffer : public CallbacksSupportProvider,
-                   public DebugMarkerSupportProvider<Buffer>,
-                   public MTSafetySupportProvider
+    class Buffer : public RefCounterSupportProvider
     {
     public:
         /* Public functions */
 
-        /** Destroys the Vulkan objects and unregister the Buffer instance from Object Tracker. */
-        virtual ~Buffer();
+        /** Initializes a new buffer object using user-specified parameters.
+         *
+         *  This constructor does NOT allocate and bind a memory block to the object. It is
+         *  user's responsibility to call Buffer::set_memory() afterward to configure the binding.
+         *
+         *  @param device_ptr              Device to use.
+         *  @param size                    Size of the buffer object to be initialized.
+         *  @param queue_families          Queue families which the buffer object is going to be used with.
+         *                                 One or more user queue family bits can be enabled.
+         *  @param queue_sharing_mode      VkSharingMode value, which is going to be passed to the vkCreateBuffer()
+         *                                 call.
+         *  @param usage_flags             Usage flags to set in the VkBufferCreateInfo descriptor, passed to
+         *                                 to the vkCreateBuffer() call.
+         *  @param should_be_mappable      true if the new buffer object should use a memory type which is
+         *                                 host-visible; false otherwise. Note that passing non-null @param opt_client_data
+         *                                 argument value forces this argument value to be true.
+         *  @param should_be_coherent      true if the new buffer object should use a memory type which supports
+         *                                 coherent memory access; false otherwise.
+         *  @param opt_client_data         if not nullptr, exactly @param size bytes will be copied to the allocated
+         *                                 buffer memory.
+         **/
+        explicit Buffer(Anvil::Device*     device_ptr,
+                        VkDeviceSize       size,
+                        QueueFamilyBits    queue_families,
+                        VkSharingMode      queue_sharing_mode,
+                        VkBufferUsageFlags usage_flags);
 
-        static Anvil::BufferUniquePtr create(Anvil::BufferCreateInfoUniquePtr in_create_info_ptr);
+        /** Initializes a new buffer object using user-specified parameters.
+         *
+         *  This constructor ALLOCATES and BINDS a unique memory block to the object. Do NOT
+         *  call Buffer::set_memory() to configure the binding.
+         *
+         *  The constructor can optionally upload data to the initialized memory.
+         *
+         *  @param device_ptr              Device to use.
+         *  @param size                    Size of the buffer object to be initialized.
+         *  @param queue_families          Queue families which the buffer object is going to be used with.
+         *                                 One or more user queue family bits can be enabled.
+         *  @param queue_sharing_mode      VkSharingMode value, which is going to be passed to the vkCreateBuffer()
+         *                                 call.
+         *  @param usage_flags             Usage flags to set in the VkBufferCreateInfo descriptor, passed to
+         *                                 to the vkCreateBuffer() call.
+         *  @param should_be_mappable      true if the new buffer object should use a memory type which is
+         *                                 host-visible; false otherwise. Note that passing non-null @param opt_client_data
+         *                                 argument value forces this argument value to be true.
+         *  @param should_be_coherent      true if the new buffer object should use a memory type which supports
+         *                                 coherent memory access; false otherwise.
+         *  @param opt_client_data         if not nullptr, exactly @param size bytes will be copied to the allocated
+         *                                 buffer memory.
+         **/
+        explicit Buffer(Anvil::Device*     device_ptr,
+                        VkDeviceSize       size,
+                        QueueFamilyBits    queue_families,
+                        VkSharingMode      queue_sharing_mode,
+                        VkBufferUsageFlags usage_flags,
+                        bool               should_be_mappable,
+                        bool               should_be_coherent,
+                        const void*        opt_client_data);
+
+        /** Creates a new Buffer wrapper instance. The new instance will reuse a region of the specified
+         *  buffer's storage, instead of creating one's own.
+         *
+         *  It is user's responsibility to ensure memory aliasing or synchronization is used, according
+         *  to the spec rules.
+         *
+         *  @param parent_buffer_ptr Specifies the buffer, whose memory block should be used. Must not be
+         *                           nullptr. The specified Buffer instance will be retained.
+         *  @param start_offset      Memory region's start offset.
+         *  @param size              Size of the memory region to "claim".
+         **/
+        explicit Buffer(Anvil::Buffer* parent_buffer_ptr,
+                        VkDeviceSize   start_offset,
+                        VkDeviceSize   size);
 
         /** Returns the lowest-level Buffer instance which stores the data exposed by this Buffer instance. */
-        const Anvil::Buffer* get_base_buffer();
+        Anvil::Buffer* get_base_buffer();
 
-        /** Returns the encapsulated raw Vulkan buffer handle
-         *
-         *  For non-sparse buffers, in case no memory block has been assigned to the buffer,
-         *  the function will issue a BUFFER_CALLBACK_ID_MEMORY_BLOCK_NEEDED call-back, so that
-         *  any memory allocator, which has this buffer scheduled for deferred memory allocation,
-         *  gets a chance to allocate & bind a memory block to the instance. A non-sparse buffer instance
-         *  without any memory block bound msut not be used for any GPU-side operation.
-         *
-         *  This behavior may optionally be disabled by setting @param in_bake_memory_if_necessary to false.
-         *  Should only be done in special circumstances.
-         */
-        VkBuffer get_buffer(const bool& in_bake_memory_if_necessary = true);
+        /** Returns the encapsulated raw Vulkan buffer handle */
+        VkBuffer get_buffer() const
+        {
+            return m_buffer;
+        }
 
         /** Returns a pointer to the encapsulated raw Vulkan buffer handle */
         const VkBuffer* get_buffer_ptr() const
@@ -104,41 +132,45 @@ namespace Anvil
             return &m_buffer;
         }
 
-        const Anvil::BufferCreateInfo* get_create_info_ptr() const
-        {
-            return m_create_info_ptr.get();
-        }
-
         /** Returns a pointer to the underlying memory block wrapper instance.
          *
-         *  For non-sparse buffers, in case no memory block has been assigned to the buffer,
-         *  the function will issue a BUFFER_CALLBACK_ID_MEMORY_BLOCK_NEEDED call-back, so that
-         *  any memory allocator, which has this buffer scheduled for deferred memory allocation,
-         *  gets a chance to allocate & bind a memory block to the instance.
-         *
-         *  Sparse buffers do not support implicit bake operations yet.
-         *
-         *  Note that resident sparse buffers may have multiple memory blocks assigned.
+         *  Under normal circumstances, you should never need to access it.
          **/
-        Anvil::MemoryBlock* get_memory_block(uint32_t in_n_memory_block);
+        Anvil::MemoryBlock* get_memory()
+        {
+            return m_memory_block_ptr;
+        }
 
         /** Returns memory requirements for the buffer */
-        VkMemoryRequirements get_memory_requirements() const;
-
-        /** Returns the number of memory blocks assigned to the buffer. */
-        uint32_t get_n_memory_blocks() const;
-
-        const Anvil::PageTracker* get_page_tracker() const
+        VkMemoryRequirements get_memory_requirements() const
         {
-            return m_page_tracker_ptr.get();
+            if (m_parent_buffer_ptr != nullptr)
+            {
+                return m_parent_buffer_ptr->get_memory_requirements();
+            }
+            else
+            {
+                return m_buffer_memory_reqs;
+            }
         }
 
-        bool prefers_dedicated_allocation() const
+        /** Returns a pointer to the parent buffer, if one was specified at creation time */
+        Anvil::Buffer* get_parent_buffer_ptr()
         {
-            return m_prefers_dedicated_allocation;
+            return m_parent_buffer_ptr;
         }
 
-        /** Reads @param in_size bytes, starting from @param in_start_offset, from the wrapped memory object.
+        /** Returns size of the encapsulated Vulkan buffer memory region.
+         *
+         *  @return >= 0 if successful, -1 otherwise */
+        VkDeviceSize get_size() const;
+
+        /** Returns start offset of the encapsulated Vulkan buffer memory region.
+         *
+         *  @return >= 0 if successful, -1 otherwise */
+        VkDeviceSize get_start_offset() const;
+
+        /** Reads @param size bytes, starting from @param start_offset, from the wrapped memory object.
          *
          *  If the buffer object uses mappable storage memory, the affected region will be mapped into process space,
          *  read from, and then unmapped. If the memory region comes from a non-coherent memory heap, it will be
@@ -146,77 +178,34 @@ namespace Anvil
          *
          *  If the buffer object uses non-mappable storage memory, a staging buffer using mappable memory will be created
          *  instead. User-specified region of the source buffer will then be copied into it by submitting a copy operation,
-         *  executed either on the transfer queue (if available), or on the universal queue. Afterward, the staging buffer
+         *  executed either on the transfer queue (if available), or on the universal queue. Afterward, the staging buffer 
          *  will be released.
-         *
-         *  The function prototype without @param in_device_mask argument should be used for single-GPU devices only.
-         *  The function prototype with @param in_device_mask argument should be used for multi-GPU devices only.
-         *  The mask must contain only one bit set.
-         *
-         *  This function must not be used to read data from buffers, whose memory backing comes from a multi-instance heap.
          *
          *  This function blocks until the transfer completes.
          *
-         *  @param in_start_offset As per description. Must be smaller than the underlying memory object's size.
-         *  @param in_size         As per description. @param in_start_offset + @param in_size must be lower than or
-         *                         equal to the underlying memory object's size.
-         *  @param out_result_ptr  Retrieved data will be stored under this location. Must not be nullptr.
+         *  @param start_offset   As per description. Must be smaller than the underlying memory object's size.
+         *  @param size           As per description. @param start_offset + @param size must be lower than or
+         *                        equal to the underlying memory object's size.
+         *  @param out_result_ptr Retrieved data will be stored under this location. Must not be nullptr.
          *
          *  @return true if the operation was successful, false otherwise.
          **/
-        bool read(VkDeviceSize in_start_offset,
-                  VkDeviceSize in_size,
+        bool read(VkDeviceSize start_offset,
+                  VkDeviceSize size,
                   void*        out_result_ptr);
-        bool read(VkDeviceSize in_start_offset,
-                  VkDeviceSize in_size,
-                  uint32_t     in_device_mask,
-                  void*        out_result_ptr);
-
-        bool requires_dedicated_allocation() const
-        {
-            return m_requires_dedicated_allocation;
-        }
 
         /** Attaches a memory block to the buffer object.
          *
          *  This function can only be called ONCE, after the object has been created with the constructor which
          *  does not allocate the memory automatically.
          *
-         *  This function can only be used for NON-SPARSE buffers. Calling this function for sparse buffers will
-         *  result in an assertion failure.
-         *
-         *  @param in_memory_block_ptr             Memory block to attach to the buffer object. Must not be NULL.
-         *  @param in_memory_block_owned_by_buffer TODO
-         *  @param in_n_device_group_indices       Describes the number of device indices available under @param in_device_group_indices_ptr.
-         *  @param in_device_group_indices_ptr     Device group indices to use to form the device mask.
+         *  @param memory_block_ptr Memory block to attach to the buffer object. Must not be NULL.
          *
          *  @return true if successful, false otherwise.
          **/
-        bool set_nonsparse_memory(MemoryBlockUniquePtr in_memory_block_ptr);
-        bool set_nonsparse_memory(MemoryBlock*         in_memory_block_ptr,
-                                  bool                 in_memory_block_owned_by_buffer);
+        bool set_memory(MemoryBlock* memory_block_ptr);
 
-        bool set_nonsparse_memory(MemoryBlockUniquePtr in_memory_block_ptr,
-                                  uint32_t             in_n_device_group_indices,
-                                  const uint32_t*      in_device_group_indices_ptr);
-        bool set_nonsparse_memory(MemoryBlock*         in_memory_block_ptr,
-                                  bool                 in_memory_block_owned_by_buffer,
-                                  uint32_t             in_n_device_group_indices,
-                                  const uint32_t*      in_device_group_indices_ptr);
-
-        /** See set_nonsparse_memory() for general documentation.
-         *
-         *  This static function can be used to set buffer memory bindings in a batched manner.
-         *
-         *  Can be used for both single- and multi-GPU devices.
-         *  Requires VK_KHR_device_group to be supported by & enabled for the device.
-         *
-         *  TODO
-         **/
-        static bool set_nonsparse_memory_multi(uint32_t                   in_n_buffer_memory_binding_updates,
-                                               BufferMemoryBindingUpdate* in_updates_ptr);
-
-        /** Writes @param in_size bytes, starting from @param in_start_offset, into the wrapped memory object.
+        /** Writes @param size bytes, starting from @param start_offset, into the wrapped memory object.
          *
          *  If the buffer object uses mappable storage memory, the affected region will be mapped into process space,
          *  updated, and then unmapped. If the memory region comes from a non-coherent memory heap, it will be
@@ -227,74 +216,51 @@ namespace Anvil
          *  transfer the new contents to the target buffer. The operation will be submitted via a transfer queue, if one
          *  is available, or a universal queue otherwise.
          *
-         *  This function must not be used to read data from buffers, whose memory backing comes from a multi-instance heap.
-         *
-         *  The function prototype without @param in_device_mask argument should be used for single-GPU devices only.
-         *
-         *  The function prototype with @param in_device_mask argument should be used for multi-GPU devices only.
-         *  The mask must contain only one bit set.
-         *
-         *  If the buffer instance uses an exclusive sharing mode and supports more than just one queue family type AND memory
-         *  backing the buffer is not mappable, you MUST specify a queue instance that should be used to perform a buffer->buffer
-         *  copy op. The queue MUST support transfer ops.
-         *
          *  This function blocks until the transfer completes.
          *
-         *  @param in_start_offset   As per description. Must be smaller than the underlying memory object's size.
-         *  @param in_size           As per description. @param in_start_offset + @param in_size must be lower than or
-         *                           equal to the underlying memory object's size.
-         *  @param in_data           Data to store. Must not be nullptr.
+         *  @param start_offset   As per description. Must be smaller than the underlying memory object's size.
+         *  @param size           As per description. @param start_offset + @param size must be lower than or
+         *                        equal to the underlying memory object's size.
+         *  @param data           Data to store. Must not be nullptr.
          *
          *  @return true if the operation was successful, false otherwise.
          **/
-        bool write(VkDeviceSize                         in_start_offset,
-                   VkDeviceSize                         in_size,
-                   const void*                          in_data,
-                   Anvil::Queue*                        in_opt_queue_ptr = nullptr);
-        bool write(VkDeviceSize                         in_start_offset,
-                   VkDeviceSize                         in_size,
-                   const void*                          in_data,
-                   uint32_t                             in_device_mask,
-                   Anvil::Queue*                        in_opt_queue_ptr = nullptr);
+        bool write(VkDeviceSize start_offset,
+                   VkDeviceSize size,
+                   const void*  data);
 
     private:
         /* Private functions */
+        Buffer           (const Buffer&);
+        Buffer& operator=(const Buffer&);
 
-        Buffer(Anvil::BufferCreateInfoUniquePtr in_create_info_ptr);
+        virtual ~Buffer();
 
-        bool init               ();
-        bool init_staging_buffer(const VkDeviceSize& in_size,
-                                 Anvil::Queue*       in_opt_queue_ptr);
-        bool set_memory_sparse  (MemoryBlock*        in_memory_block_ptr,
-                                 bool                in_memory_block_owned_by_buffer,
-                                 VkDeviceSize        in_memory_start_offset,
-                                 VkDeviceSize        in_start_offset,
-                                 VkDeviceSize        in_size);
-
-        bool set_memory_nonsparse_internal(MemoryBlockUniquePtr in_memory_block_ptr,
-                                           uint32_t             in_n_device_group_indices,
-                                           const uint32_t*      in_device_group_indices_ptr);
-
-        bool is_memory_block_owned(const MemoryBlock* in_memory_block_ptr) const;
+        void convert_queue_family_bits_to_family_indices(Anvil::QueueFamilyBits queue_families,
+                                                         uint32_t*              out_opt_queue_family_indices_ptr,
+                                                         uint32_t*              out_opt_n_queue_family_indices_ptr) const;
+        void create_buffer                              (Anvil::QueueFamilyBits queue_families,
+                                                         VkSharingMode          sharing_mode,
+                                                         VkDeviceSize           size);
 
         /* Private members */
-        VkBuffer                                 m_buffer;
-        VkMemoryRequirements                     m_buffer_memory_reqs;
-        std::unique_ptr<Anvil::BufferCreateInfo> m_create_info_ptr;
+        VkBuffer              m_buffer;
+        VkMemoryRequirements  m_buffer_memory_reqs;
+        VkDeviceSize          m_buffer_size;
+        Anvil::Device*        m_device_ptr;
+        Anvil::MemoryBlock*   m_memory_block_ptr;
+        Anvil::Buffer*        m_parent_buffer_ptr;
+        VkDeviceSize          m_start_offset;
+        VkBufferUsageFlagBits m_usage_flags;
+    };
 
-        Anvil::MemoryBlock*                  m_memory_block_ptr; // only used by non-sparse buffers
-        std::unique_ptr<Anvil::PageTracker>  m_page_tracker_ptr; // only used by sparse buffers
-        Anvil::BufferUniquePtr               m_staging_buffer_ptr;
-        Anvil::Queue*                        m_staging_buffer_queue_ptr;
-
-        std::vector<MemoryBlockUniquePtr> m_owned_memory_blocks;
-        bool                              m_prefers_dedicated_allocation;
-        bool                              m_requires_dedicated_allocation;
-
-        friend class Anvil::Queue; /* set_memory_sparse() */
-
-        ANVIL_DISABLE_ASSIGNMENT_OPERATOR(Buffer);
-        ANVIL_DISABLE_COPY_CONSTRUCTOR(Buffer);
+    /** Delete functor. Useful if you need to wrap the buffer instance in an auto pointer */
+    struct BufferDeleter
+    {
+        void operator()(Buffer* buffer_ptr) const
+        {
+            buffer_ptr->release();
+        }
     };
 }; /* namespace Anvil */
 

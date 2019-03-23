@@ -1,14 +1,12 @@
 //
-// Copyright (C) 2002-2005  3Dlabs Inc. Ltd.
-// Copyright (C) 2012-2013 LunarG, Inc.
-// Copyright (C) 2017 ARM Limited.
-// Copyright (C) 2015-2018 Google, Inc.
+//Copyright (C) 2002-2005  3Dlabs Inc. Ltd.
+//Copyright (C) 2012-2013 LunarG, Inc.
 //
-// All rights reserved.
+//All rights reserved.
 //
-// Redistribution and use in source and binary forms, with or without
-// modification, are permitted provided that the following conditions
-// are met:
+//Redistribution and use in source and binary forms, with or without
+//modification, are permitted provided that the following conditions
+//are met:
 //
 //    Redistributions of source code must retain the above copyright
 //    notice, this list of conditions and the following disclaimer.
@@ -22,22 +20,22 @@
 //    contributors may be used to endorse or promote products derived
 //    from this software without specific prior written permission.
 //
-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
-// FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
-// COPYRIGHT HOLDERS OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
-// INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
-// BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
-// LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
-// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
-// LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
-// ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-// POSSIBILITY OF SUCH DAMAGE.
+//THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+//"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+//LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+//FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+//COPYRIGHT HOLDERS OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+//INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+//BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+//LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+//CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+//LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+//ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+//POSSIBILITY OF SUCH DAMAGE.
 //
 
 //
-// Symbol table for parsing.  Most functionality and main ideas
+// Symbol table for parsing.  Most functionaliy and main ideas
 // are documented in the header file.
 //
 
@@ -52,7 +50,7 @@ namespace glslang {
 //
 // Recursively generate mangled names.
 //
-void TType::buildMangledName(TString& mangledName) const
+void TType::buildMangledName(TString& mangledName)
 {
     if (isMatrix())
         mangledName += 'm';
@@ -62,25 +60,14 @@ void TType::buildMangledName(TString& mangledName) const
     switch (basicType) {
     case EbtFloat:              mangledName += 'f';      break;
     case EbtDouble:             mangledName += 'd';      break;
-    case EbtFloat16:            mangledName += "f16";    break;
     case EbtInt:                mangledName += 'i';      break;
     case EbtUint:               mangledName += 'u';      break;
-    case EbtInt8:               mangledName += "i8";     break;
-    case EbtUint8:              mangledName += "u8";     break;
-    case EbtInt16:              mangledName += "i16";    break;
-    case EbtUint16:             mangledName += "u16";    break;
     case EbtInt64:              mangledName += "i64";    break;
     case EbtUint64:             mangledName += "u64";    break;
     case EbtBool:               mangledName += 'b';      break;
     case EbtAtomicUint:         mangledName += "au";     break;
-#ifdef NV_EXTENSIONS
-    case EbtAccStructNV:        mangledName += "asnv";   break;
-#endif
     case EbtSampler:
         switch (sampler.type) {
-#ifdef AMD_EXTENSIONS
-        case EbtFloat16: mangledName += "f16"; break;
-#endif
         case EbtInt:   mangledName += "i"; break;
         case EbtUint:  mangledName += "u"; break;
         default: break; // some compilers want this
@@ -99,8 +86,6 @@ void TType::buildMangledName(TString& mangledName) const
             mangledName += "S";
         if (sampler.external)
             mangledName += "E";
-        if (sampler.yuv)
-            mangledName += "Y";
         switch (sampler.dim) {
         case Esd1D:       mangledName += "1";  break;
         case Esd2D:       mangledName += "2";  break;
@@ -111,32 +96,11 @@ void TType::buildMangledName(TString& mangledName) const
         case EsdSubpass:  mangledName += "P";  break;
         default: break; // some compilers want this
         }
-
-        if (sampler.hasReturnStruct()) {
-            // Name mangle for sampler return struct uses struct table index.
-            mangledName += "-tx-struct";
-
-            char text[16]; // plenty enough space for the small integers.
-            snprintf(text, sizeof(text), "%d-", sampler.structReturnIndex);
-            mangledName += text;
-        } else {
-            switch (sampler.getVectorSize()) {
-            case 1: mangledName += "1"; break;
-            case 2: mangledName += "2"; break;
-            case 3: mangledName += "3"; break;
-            case 4: break; // default to prior name mangle behavior
-            }
-        }
-
         if (sampler.ms)
             mangledName += "M";
         break;
     case EbtStruct:
-    case EbtBlock:
-        if (basicType == EbtStruct)
-            mangledName += "struct-";
-        else
-            mangledName += "block-";
+        mangledName += "struct-";
         if (typeName)
             mangledName += *typeName;
         for (unsigned int i = 0; i < structure->size(); ++i) {
@@ -286,28 +250,22 @@ TSymbol::TSymbol(const TSymbol& copyOf)
 }
 
 TVariable::TVariable(const TVariable& copyOf) : TSymbol(copyOf)
-{
+{	
     type.deepCopy(copyOf.type);
     userType = copyOf.userType;
-
-    // we don't support specialization-constant subtrees in cloned tables, only extensions
-    constSubtree = nullptr;
-    extensions = nullptr;
-    memberExtensions = nullptr;
-    if (copyOf.getNumExtensions() > 0)
-        setExtensions(copyOf.getNumExtensions(), copyOf.getExtensions());
-    if (copyOf.hasMemberExtensions()) {
-        for (int m = 0; m < (int)copyOf.type.getStruct()->size(); ++m) {
-            if (copyOf.getNumMemberExtensions(m) > 0)
-                setMemberExtensions(m, copyOf.getNumMemberExtensions(m), copyOf.getMemberExtensions(m));
-        }
-    }
+    numExtensions = 0;
+    extensions = 0;
+    if (copyOf.numExtensions != 0)
+        setExtensions(copyOf.numExtensions, copyOf.extensions);
 
     if (! copyOf.constArray.empty()) {
         assert(! copyOf.type.isStruct());
         TConstUnionArray newArray(copyOf.constArray, 0, copyOf.constArray.size());
         constArray = newArray;
     }
+
+    // don't support specialization-constant subtrees in cloned tables
+    constSubtree = nullptr;
 }
 
 TVariable* TVariable::clone() const
@@ -318,24 +276,22 @@ TVariable* TVariable::clone() const
 }
 
 TFunction::TFunction(const TFunction& copyOf) : TSymbol(copyOf)
-{
+{	
     for (unsigned int i = 0; i < copyOf.parameters.size(); ++i) {
         TParameter param;
         parameters.push_back(param);
         parameters.back().copyParam(copyOf.parameters[i]);
     }
 
-    extensions = nullptr;
-    if (copyOf.getNumExtensions() > 0)
-        setExtensions(copyOf.getNumExtensions(), copyOf.getExtensions());
+    numExtensions = 0;
+    extensions = 0;
+    if (copyOf.extensions != 0)
+        setExtensions(copyOf.numExtensions, copyOf.extensions);
     returnType.deepCopy(copyOf.returnType);
     mangledName = copyOf.mangledName;
     op = copyOf.op;
     defined = copyOf.defined;
     prototyped = copyOf.prototyped;
-    implicitThis = copyOf.implicitThis;
-    illegalImplicitThis = copyOf.illegalImplicitThis;
-    defaultParamCount = copyOf.defaultParamCount;
 }
 
 TFunction* TFunction::clone() const
@@ -359,19 +315,18 @@ TSymbolTableLevel* TSymbolTableLevel::clone() const
 {
     TSymbolTableLevel *symTableLevel = new TSymbolTableLevel();
     symTableLevel->anonId = anonId;
-    symTableLevel->thisLevel = thisLevel;
     std::vector<bool> containerCopied(anonId, false);
     tLevel::const_iterator iter;
     for (iter = level.begin(); iter != level.end(); ++iter) {
         const TAnonMember* anon = iter->second->getAsAnonMember();
         if (anon) {
             // Insert all the anonymous members of this same container at once,
-            // avoid inserting the remaining members in the future, once this has been done,
+            // avoid inserting the other members in the future, once this has been done,
             // allowing them to all be part of the same new container.
             if (! containerCopied[anon->getAnonId()]) {
                 TVariable* container = anon->getAnonContainer().clone();
                 container->changeName(NewPoolTString(""));
-                // insert the container and all its members
+                // insert the whole container
                 symTableLevel->insert(*container, false);
                 containerCopied[anon->getAnonId()] = true;
             }

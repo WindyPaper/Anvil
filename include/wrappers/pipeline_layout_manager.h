@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2017-2018 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2016 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -25,85 +25,87 @@
  *  - caches all pipeline layout wrappers and re-uses already instantiated wrappers,
  *    if user-requested one is already available.
  *
- *  Opt-in MT-safety available.
  **/
 #ifndef PIPELINE_LAYOUT_MANAGER_H
 #define PIPELINE_LAYOUT_MANAGER_H
 
-#include "misc/mt_safety.h"
 #include "misc/types.h"
 #include <memory>
 
 namespace Anvil
 {
-    class PipelineLayoutManager : public MTSafetySupportProvider
+    class PipelineLayoutManager
     {
     public:
         /* Public functions */
 
-        /** Destructor */
-        ~PipelineLayoutManager();
+        /** Returns a pointer to the global PipelineLayoutManager instance.
+         *
+         *  First call to the function will instantiate the object. The object needs to
+         *  be released (by calling release() ) as many time as accquire() was called.
+         *
+         *  @param device_ptr Device to initialize the manager for.
+         *
+         *  @return PipelineLayoutManager instance, or nullptr if the function failed.
+         **/
+        static PipelineLayoutManager* acquire(Anvil::Device* device_ptr);
 
-        /** Returns a pipeline layout wrapper matching the specified DSG + push constant range configuration.
+        /** Retains & returns a pipeline layout wrapper matching the specified DSG + push constant range configuration.
          *  If such pipeline layout has never been defined before, it will be created at the call time.
          *
-         *  @param in_ds_create_info_items_ptr TODO.
-         *  @param in_push_constant_ranges     A vector of PushConstantRange descriptor, describing the push constant ranges
+         *  If the function returns a Anvil::PipelineLayout instance, it is caller's responsibility to release it
+         *  in order for the object to be correctly deleted when its reference counter drops to zero.
+         *
+         *  @param dsgs                        A vector of DescriptorSetGroup instances, describing the set of descriptor sets which the
+         *                                     layout should refer to.
+         *  @param push_constant_ranges        A vector of PushConstantRange descriptor, describing the push constant ranges
          *                                     the layout should define.
          *  @param out_pipeline_layout_ptr_ptr Deref will be set to a ptr to the pipeline layout wrapper instance, matching the described
-         *                                     requirements. Must not be nullptr.
+         *                                     requirements. The object will be retained, prior to being returned. Must not be nullptr.
          *
          *  @return true if successful, false otherwise.
          **/
-        bool get_layout(const std::vector<DescriptorSetCreateInfoUniquePtr>* in_ds_create_info_items_ptr,
-                        const PushConstantRanges&                            in_push_constant_ranges,
-                        Anvil::PipelineLayoutUniquePtr*                      out_pipeline_layout_ptr_ptr);
+        bool get_retained_layout(const DescriptorSetGroups& dsgs,
+                                 const PushConstantRanges&  push_constant_ranges,
+                                 Anvil::PipelineLayout**    out_pipeline_layout_ptr_ptr);
 
-    protected:
-        /* Protected functions */
+        /** Decrements the internal reference counter and releases the manager instance, if the counter
+         *  drops to zero.
+         **/
+        void release();
 
     private:
         /* Private type declarations */
-        typedef struct PipelineLayoutContainer
+        typedef std::vector<Anvil::PipelineLayout*> PipelineLayouts;
+
+        typedef struct PipelineLayoutManagerInfo
         {
-            std::atomic<uint32_t>   n_references;
-            PipelineLayoutUniquePtr pipeline_layout_ptr;
+                     PipelineLayoutManager* instance_ptr;
+            volatile uint32_t               ref_counter;
 
-            PipelineLayoutContainer()
-                :n_references(1)
+            PipelineLayoutManagerInfo()
             {
-                /* Stub */
+                instance_ptr = nullptr;
+                ref_counter  = 0;
             }
-        } PipelineLayoutContainer;
 
-        typedef std::vector<std::unique_ptr<PipelineLayoutContainer> > PipelineLayouts;
+        } PipelineLayoutManagerInfo;
 
         /* Private functions */
-        PipelineLayoutManager(const Anvil::BaseDevice* in_device_ptr,
-                              bool                     in_mt_safe);
+         PipelineLayoutManager(Anvil::Device* device_ptr);
+        ~PipelineLayoutManager();
 
         PipelineLayoutManager           (const PipelineLayoutManager&);
         PipelineLayoutManager& operator=(const PipelineLayoutManager&);
 
-        void on_pipeline_layout_dereferenced(Anvil::PipelineLayout* in_layout_ptr);
-
-        /** Instantiates a new PipelineLayoutManager instance.
-         *
-         *  NOTE: This function should only be used by Device.
-         *
-         *  @param in_device_ptr Device to initialize the manager for.
-         *  @param in_mt_safe    Set to true if the instance should provide multi-threaded access safety.
-         *
-         *  @return PipelineLayoutManager instance, or nullptr if the function failed.
-         **/
-        static Anvil::PipelineLayoutManagerUniquePtr create(const Anvil::BaseDevice* in_device_ptr,
-                                                            bool                     in_mt_safe);
+        static void on_pipeline_layout_dropped(void* callback_arg,
+                                               void* user_arg);
 
         /* Private members */
-        const Anvil::BaseDevice* m_device_ptr;
-        PipelineLayouts          m_pipeline_layouts;
+        Anvil::Device* m_device_ptr;
+        PipelineLayouts m_pipeline_layouts;
 
-        friend class BaseDevice;
+        static std::map<Anvil::Device*, PipelineLayoutManagerInfo> m_instance_map;
     };
 }; /* Vulkan namespace */
 

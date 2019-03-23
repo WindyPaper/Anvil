@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2017-2018 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2016 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,24 +24,46 @@
 #include "misc/pools.h"
 #include "wrappers/command_buffer.h"
 #include "wrappers/command_pool.h"
+#include "wrappers/pipeline_layout.h"
 
-Anvil::PrimaryCommandBufferUniquePtr Anvil::PrimaryCommandBufferPoolWorker::create_item()
+/* Please see header for specification */
+Anvil::PrimaryCommandBufferPoolWorker::PrimaryCommandBufferPoolWorker(Anvil::CommandPool* parent_command_pool_ptr)
+    :m_parent_command_pool_ptr(parent_command_pool_ptr)
+{
+    anvil_assert(m_parent_command_pool_ptr != nullptr)
+
+    m_parent_command_pool_ptr->retain();
+}
+
+/* Please see header for specification */
+Anvil::PrimaryCommandBufferPool::PrimaryCommandBufferPool(Anvil::CommandPool* parent_command_pool_ptr,
+                                                           uint32_t             n_preallocated_items)
+    :GenericPool(n_preallocated_items,
+                 new PrimaryCommandBufferPoolWorker(parent_command_pool_ptr) )
+{
+    /* Stub */
+}
+
+/* Please see header for specification */
+Anvil::PrimaryCommandBufferPoolWorker::~PrimaryCommandBufferPoolWorker()
+{
+    m_parent_command_pool_ptr->release();
+}
+
+/* Please see header for specification */
+Anvil::PrimaryCommandBuffer* Anvil::PrimaryCommandBufferPoolWorker::create_item()
 {
     return m_parent_command_pool_ptr->alloc_primary_level_command_buffer();
 }
 
-void Anvil::PrimaryCommandBufferPoolWorker::reset_item(Anvil::PrimaryCommandBufferUniquePtr& in_item_ptr)
+/* Please see header for specification */
+void Anvil::PrimaryCommandBufferPoolWorker::reset_item(PrimaryCommandBuffer* item_ptr)
 {
-    in_item_ptr->reset(false /* should_release_resources */);
+    item_ptr->reset(false /* should_release_resources */);
 }
 
-
-Anvil::SecondaryCommandBufferUniquePtr Anvil::SecondaryCommandBufferPoolWorker::create_item()
+/* Please see header for specification */
+void Anvil::PrimaryCommandBufferPoolWorker::release_item(PrimaryCommandBuffer* item_ptr)
 {
-    return m_parent_command_pool_ptr->alloc_secondary_level_command_buffer();
-}
-
-void Anvil::SecondaryCommandBufferPoolWorker::reset_item(Anvil::SecondaryCommandBufferUniquePtr& in_item_ptr)
-{
-    in_item_ptr->reset(false /* should_release_resources */);
+    item_ptr->release();
 }

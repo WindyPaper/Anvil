@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2017-2018 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2016 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -31,84 +31,65 @@
 #define WRAPPERS_DESCRIPTOR_SET_LAYOUT_H
 
 #include "misc/callbacks.h"
-#include "misc/debug_marker.h"
-#include "misc/mt_safety.h"
+#include "misc/ref_counter.h"
 #include "misc/types.h"
 #include "wrappers/sampler.h"
 #include <memory>
 
 namespace Anvil
 {
+    enum
+    {
+        /* Notification fired whenever a new binding is added to the layout.
+         *
+         * callback argument: pointer to the originating DescriptorSetLayout instance
+         **/
+        DESCRIPTOR_SET_LAYOUT_CALLBACK_ID_BINDING_ADDED,
+
+        /* Always last */
+        DESCRIPTOR_SET_LAYOUT_CALLBACK_ID_COUNT
+    };
+
     /* Descriptor Set Layout wrapper */
-    class DescriptorSetLayout : public DebugMarkerSupportProvider<DescriptorSetLayout>,
-                                public MTSafetySupportProvider
+    class DescriptorSetLayout : public CallbacksSupportProvider,
+                                public RefCounterSupportProvider
     {
     public:
         /* Public functions */
 
-        /** Destructor.
-         *
-         *  Destroys the Vulkan counterpart and unregisters the instance from the
-         *  object tracker.
-         **/
-        virtual ~DescriptorSetLayout();
-
-        /** Creates a new DescriptorSetLayout instance.
+        /** Constructor.
          *
          *  No Vulkan Descriptor Set Layout is instantiated at creation time. One will only be created
          *  at getter time.
          *
-         *  @param in_device_ptr Device the layout will be created for.
+         *  @param device_ptr Device the layout will be created for.
          *
          **/
-        static DescriptorSetLayoutUniquePtr create(DescriptorSetCreateInfoUniquePtr in_ds_create_info_ptr,
-                                                   const Anvil::BaseDevice*         in_device_ptr,
-                                                   MTSafety                         in_mt_safety = Anvil::MTSafety::INHERIT_FROM_PARENT_DEVICE);
+        DescriptorSetLayout(Anvil::Device* device_ptr);
 
-        const Anvil::DescriptorSetCreateInfo* get_create_info() const
-        {
-            return m_create_info_ptr.get();
-        }
-
-        /** Bakes a Vulkan object, if one is needed, and returns Vulkan DS layout handle.
+        /** Adds a new binding to the layout instance.
          *
-         *  Note that this call may invalidate previously returned layout handles, if the layout wrapper has
-         *  been modified since the last getter call.
+         *  It is an error to attempt to add a binding at an index, for which another binding has
+         *  already been specified.
          *
-         *  @return As per description.
+         *  It is an error to attempt to define immutable samplers for descriptors of type other than
+         *  sampler or combined image+sampler.
+         *
+         *  @param binding_index          Index of the binding to configure.
+         *  @param descriptor_type        Type of the descriptor to use for the binding.
+         *  @param descriptor_array_size  Size of the descriptor array to use for the binding.
+         *  @param stage_flags            Rendering stages which are going to use the binding.
+         *  @param immutable_sampler_ptrs If not nullptr, an array of @param descriptor_array_size samplers should
+         *                                be passed. These sampler will be considered immutable, as per spec language.
+         *                                May be nullptr.
+         *
+         *  @return true if successful, false otherwise.
          **/
-        VkDescriptorSetLayout get_layout() const
-        {
-            anvil_assert(m_layout != VK_NULL_HANDLE);
-
-            return m_layout;
-        }
-
-        /* Returns the maximum number of variable descriptor count binding size supported for the specified descriptor set layout.
-         *
-         * Requires VK_KHR_maintenance3 and VK_KHR_descriptor_indexing.
-         *
-         * @param in_ds_create_info_ptr Instance obtained by calling DescriptorSetInfo::create_descriptor_set_layout_create_info().
-         *                              Must not be null.
-         */
-        static uint32_t get_maximum_variable_descriptor_count(const DescriptorSetLayoutCreateInfoContainer* in_ds_create_info_ptr,
-                                                              const Anvil::BaseDevice*                      in_device_ptr);
-
-        /* Checks if the specified descriptor set layout create info structure can be used to create a descriptor set layout instance.
-         *
-         * The app should call this function if the DS create info structure defines a number of descriptors that exceeds the 
-         * VkPhysicalDeviceMaintenance3PropertiesKHR::maxPerSetDescriptors limit.
-         *
-         * Requires VK_KHR_maintenance3.
-         *
-         * @param in_ds_create_info_ptr Instance obtained by calling DescriptorSetInfo::create_descriptor_set_layout_create_info().
-         *                              Must not be null.
-         */
-        static bool meets_max_per_set_descriptors_limit(const DescriptorSetLayoutCreateInfoContainer* in_ds_create_info_ptr,
-                                                        const Anvil::BaseDevice*                      in_device_ptr);
-
-    private:
-        /* Private functions */
+        bool add_binding(uint32_t           binding_index,
+                         VkDescriptorType   descriptor_type,
+                         uint32_t           descriptor_array_size,
+                         VkShaderStageFlags stage_flags,
+                         Anvil::Sampler**   immutable_sampler_ptrs = nullptr);
 
         /** Converts internal layout representation to a Vulkan object.
          *
@@ -117,20 +98,124 @@ namespace Anvil
          *
          *  @return true if successful, false otherwise.
          **/
-        bool init();
+        bool bake();
 
-        /* Please see create() documentation for more details */
-        DescriptorSetLayout(DescriptorSetCreateInfoUniquePtr in_ds_create_info_ptr,
-                            const Anvil::BaseDevice*         in_device_ptr,
-                            bool                             in_mt_safe);
+        /** Retrieves properties of a single defined binding.
+         *
+         *  @param n_binding                              Index number of the binding to retrieve properties of.
+         *  @param opt_out_binding_index_ptr              May be nullptr. If not, deref will be set to the index of the
+         *                                                binding. This does NOT need to be equal to @param n_binding.
+         *  @param opt_out_descriptor_type_ptr            May be nullptr. If not, deref will be set to the descriptor type
+         *                                                for the specified binding.
+         *  @param opt_out_descriptor_array_size_ptr      May be nullptr. If not, deref will be set to size of the descriptor
+         *                                                array, associated with the specified binding.
+         *  @param opt_out_stage_flags_ptr                May be nullptr. If not, deref will be set to stage flags,
+         *                                                as configured for the specified binding.
+         *  @param opt_out_immutable_samplers_enabled_ptr May be nullptr. If not, deref will be set to true if immutable samplers
+         *                                                have been defined for the specified binding; otherwise, it will be
+         *                                                set to false.
+         *
+         *  @return true if successful, false otherwise.
+         **/
+        bool get_binding_properties(uint32_t            n_binding,
+                                    uint32_t*           opt_out_binding_index_ptr,
+                                    VkDescriptorType*   opt_out_descriptor_type_ptr,
+                                    uint32_t*           opt_out_descriptor_array_size_ptr,
+                                    VkShaderStageFlags* opt_out_stage_flags_ptr,
+                                    bool*               opt_out_immutable_samplers_enabled_ptr);
 
+        /** Bakes a Vulkan object, if one is needed, and returns Vulkan DS layout handle.
+         *
+         *  Note that this call may invalidate previously returned layout handles, if the layout wrapper has
+         *  been modified since the last getter call.
+         *
+         *  @return As per description.
+         **/
+        VkDescriptorSetLayout get_layout()
+        {
+            if (m_dirty)
+            {
+                bake();
+            }
+
+            return m_layout;
+        }
+
+        /** Returns the number of bindings defined for the layout. */
+        uint32_t get_n_bindings() const
+        {
+            return static_cast<uint32_t>(m_bindings.size() );
+        }
+
+    private:
+        /* Private type definitions */
+
+        /** Describes a single descriptor set layout binding */
+        typedef struct Binding
+        {
+            uint32_t                                      descriptor_array_size;
+            VkDescriptorType                              descriptor_type;
+            std::vector<std::shared_ptr<Anvil::Sampler> > immutable_samplers;
+            VkShaderStageFlagBits                         stage_flags;
+
+            /** Dummy constructor. Do not use. */
+            Binding()
+            {
+                descriptor_array_size = 0;
+                descriptor_type       = VK_DESCRIPTOR_TYPE_MAX_ENUM;
+                stage_flags           = static_cast<VkShaderStageFlagBits>(0);
+            }
+
+            /** Constructor.
+             *
+             *  For argument discussion, please see Anvil::DescriptorSetLayout::add_binding() documentation.
+             **/
+            Binding(uint32_t           in_descriptor_array_size,
+                    VkDescriptorType   in_descriptor_type,
+                    VkShaderStageFlags in_stage_flags,
+                    Anvil::Sampler**   in_immutable_sampler_ptrs)
+            {
+                descriptor_array_size = in_descriptor_array_size;
+                descriptor_type       = in_descriptor_type;
+                stage_flags           = static_cast<VkShaderStageFlagBits>(in_stage_flags);
+
+                if (in_immutable_sampler_ptrs != nullptr)
+                {
+                    for (uint32_t n_sampler = 0;
+                                  n_sampler < descriptor_array_size;
+                                ++n_sampler)
+                    {
+                        immutable_samplers.push_back(std::shared_ptr<Anvil::Sampler>(in_immutable_sampler_ptrs[n_sampler],
+                                                                                     Anvil::SamplerDeleter() ));
+
+                        in_immutable_sampler_ptrs[n_sampler]->retain();
+                    }
+                }
+            }
+        } Binding;
+
+        typedef std::map<BindingIndex, Binding> BindingIndexToBindingMap;
+
+        /* Private functions */
         DescriptorSetLayout           (const DescriptorSetLayout&);
         DescriptorSetLayout& operator=(const DescriptorSetLayout&);
 
+        virtual ~DescriptorSetLayout();
+
         /* Private variables */
-        DescriptorSetCreateInfoUniquePtr m_create_info_ptr;
-        const Anvil::BaseDevice*         m_device_ptr;
-        VkDescriptorSetLayout            m_layout;
+        BindingIndexToBindingMap m_bindings;
+        Anvil::Device*           m_device_ptr;
+        bool                     m_dirty;
+        VkDescriptorSetLayout    m_layout;
+    };
+
+    /* Delete functor. Useful for wrapping DescriptorSetLayout instances in auto pointers. */
+    struct DescriptorSetLayoutDeleter
+    {
+        bool operator()(DescriptorSetLayout* layout_ptr)
+        {
+            layout_ptr->release();
+        }
     };
 }; /* namespace Anvil */
 

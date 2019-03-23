@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2017-2018 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2016 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -21,58 +21,51 @@
 //
 
 #include "misc/debug.h"
-#include "misc/types.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 
-static void default_assertion_failure_handler(const char*  in_filename,
-                                              unsigned int in_line,
-                                              const char*  in_message);
+static void default_assertion_failure_handler(const char*  filename,
+                                              unsigned int line,
+                                              const char*  message);
 
 
-static Anvil::AssertionFailedCallbackFunction g_anvil_assertion_check_failed_func = std::bind(default_assertion_failure_handler,
-                                                                                              std::placeholders::_1,
-                                                                                              std::placeholders::_2,
-                                                                                              std::placeholders::_3);
+Anvil::PFNASSERTIONFAILEDCALLBACKPROC g_anvil_assertion_check_failed_func_ptr = default_assertion_failure_handler;
 
 
 /** Please see header for specification */
-void default_assertion_failure_handler(const char*  in_filename,
-                                       unsigned int in_line,
-                                       const char*  in_message)
+void default_assertion_failure_handler(const char*  filename,
+                                       unsigned int line,
+                                       const char*  message)
 {
     fprintf(stderr,
-             "Assertion failed in [%s:%d]: %s\n",
-             in_filename,
-             in_line,
-             in_message);
+             "Assertion failed in [%s:%d]: %s",
+             filename,
+             line,
+             message);
     fflush  (stderr);
 
     exit(-1);
 }
 
 /** Please see header for specification */
-void Anvil::on_assertion_failed(const char*  in_filename,
-                                unsigned int in_line,
-                                const char*  in_message)
+void Anvil::on_assertion_failed(const char*  filename,
+                                unsigned int line,
+                                const char*  message)
 {
     #if defined(_WIN32) && defined(_DEBUG)
     {
-        if (::IsDebuggerPresent() )
-        {
-            __debugbreak();
-        }
+        __debugbreak();
     }
     #endif
 
-    g_anvil_assertion_check_failed_func(in_filename,
-                                        in_line,
-                                        in_message);
+    g_anvil_assertion_check_failed_func_ptr(filename,
+                                            line,
+                                            message);
 }
 
 /** Please see header for specification */
-void Anvil::set_assertion_failure_handler(Anvil::AssertionFailedCallbackFunction in_new_callback_func)
+void Anvil::set_assertion_failure_handler(Anvil::PFNASSERTIONFAILEDCALLBACKPROC new_callback_func_ptr)
 {
-    g_anvil_assertion_check_failed_func = in_new_callback_func;
+    g_anvil_assertion_check_failed_func_ptr = new_callback_func_ptr;
 }

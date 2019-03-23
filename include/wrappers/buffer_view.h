@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2017-2018 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2016 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -30,24 +30,29 @@
 #ifndef WRAPPERS_BUFFER_VIEW_H
 #define WRAPPERS_BUFFER_VIEW_H
 
-#include "misc/mt_safety.h"
+#include "misc/ref_counter.h"
 #include "misc/types.h"
 
 namespace Anvil
 {
     /** Wrapper class for Vulkan buffer views */
-    class BufferView : public DebugMarkerSupportProvider<BufferView>,
-                       public MTSafetySupportProvider
+    class BufferView : public RefCounterSupportProvider
     {
     public:
         /* Public functions */
 
-        /** Creates a single Vulkan buffer view instance and registers the object in Object Tracker.
-         *  For argument documentation, please see Vulkan API specification. */
-        static BufferViewUniquePtr create(Anvil::BufferViewCreateInfoUniquePtr in_create_info_ptr);
-
-        /** Destructor */
-        virtual ~BufferView();
+        /** Constructor.
+         *
+         *  Creates a single Vulkan buffer view instance and registers the object in Object Tracker.
+         *  For argument documentation, please see Vulkan API specification.
+         *
+         *  NOTE: @param buffer_ptr is retained and will be released at buffer view destruction time.
+         */
+        BufferView(Anvil::Device* device_ptr,
+                   Anvil::Buffer* buffer_ptr,
+                   VkFormat       format,
+                   VkDeviceSize   start_offset,
+                   VkDeviceSize   size);
 
         /** Retrieves a raw Vulkan handle for the underlying VkBufferView instance. */
         VkBufferView get_buffer_view() const
@@ -61,23 +66,31 @@ namespace Anvil
             return &m_buffer_view;
         }
 
-        const Anvil::BufferViewCreateInfo* get_create_info_ptr() const
-        {
-            return m_create_info_ptr.get();
-        }
-
     private:
         /* Private functions */
-        BufferView(Anvil::BufferViewCreateInfoUniquePtr in_create_info_ptr);
+        BufferView           (const BufferView&);
+        BufferView& operator=(const BufferView&);
 
-        bool init();
+        virtual ~BufferView();
 
         /* Private variables */
-        VkBufferView                         m_buffer_view;
-        Anvil::BufferViewCreateInfoUniquePtr m_create_info_ptr;
+        Anvil::Buffer* m_buffer_ptr;
+        VkBufferView   m_buffer_view;
+        Anvil::Device* m_device_ptr;
+        VkFormat       m_format;
+        VkDeviceSize   m_size;
+        VkDeviceSize   m_start_offset;
+    };
 
-        ANVIL_DISABLE_ASSIGNMENT_OPERATOR(BufferView);
-        ANVIL_DISABLE_COPY_CONSTRUCTOR(BufferView);
+    /** Buffer view wrapper deleter. Useful if you need to wrap a BufferView instance in an
+     *  auto pointer.
+     **/
+    struct BufferViewDeleter
+    {
+        void operator()(BufferView* buffer_view_ptr) const
+        {
+            buffer_view_ptr->release();
+        }
     };
 }; /* namespace Anvil */
 

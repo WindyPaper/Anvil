@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2017 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2016 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -35,58 +35,41 @@ namespace Anvil
     {
     public:
         /* Public functions */
-        static Anvil::WindowUniquePtr create(const std::string&             in_title,
-                                             unsigned int                   in_width,
-                                             unsigned int                   in_height,
-                                             bool                           in_closable,
-                                             Anvil::PresentCallbackFunction in_present_callback_func,
-                                             bool                           in_visible);
+        WindowXcb(const std::string&     title,
+                  unsigned int           width,
+                  unsigned int           height,
+                  PFNPRESENTCALLBACKPROC present_callback_func_ptr,
+                  void*                  present_callback_func_user_arg);
 
-        static Anvil::WindowUniquePtr create(xcb_connection_t* in_connection_ptr,
-                                             WindowHandle      in_window_handle);
-
-        virtual ~WindowXcb();
-
-        virtual void close();
-        virtual void run();
-
-        /* Returns window's platform */
-        WindowPlatform get_platform() const
-        {
-            return WINDOW_PLATFORM_XCB;
-        }
+        virtual void    close();
+        virtual void    run();
 
         /* Tells if it's a dummy window (offscreen rendering thus no WSI/swapchain involved) */
-        virtual bool is_dummy()
+        virtual bool    is_dummy()
         {
             return false;
         }
 
         /** Returns system XCB connection, should be used by linux only */
-        virtual void* get_connection() const
+        virtual void*   get_connection() const
         {
             return m_connection_ptr;
         }
 
     private:
-        WindowXcb(const std::string&             in_title,
-                  unsigned int                   in_width,
-                  unsigned int                   in_height,
-                  bool                           in_closable,
-                  Anvil::PresentCallbackFunction in_present_callback_func);
-        WindowXcb(xcb_connection_t*              in_connection_ptr,
-                  WindowHandle                   in_window_handle);
+        /* Private functions */
+        virtual        ~WindowXcb();
 
         /** Creates a new system window and prepares it for usage. */
-        bool init           (const bool& in_visible);
-        bool init_connection();
+        void            init();
+
+        void            init_connection();
 
         /* Private variables */
         xcb_intern_atom_reply_t* m_atom_wm_delete_window_ptr;
-        xcb_connection_t*        m_connection_ptr;
         xcb_screen_t*            m_screen_ptr;
         xcb_key_symbols_t*       m_key_symbols;
-        XCBLoader                m_xcb_loader;
+        XCBLoaderForAnvil        m_xcb_loader;
     };
 }; /* namespace Anvil */
 

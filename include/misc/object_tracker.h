@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2017-2018 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2016 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -32,82 +32,62 @@
  *  ObjectTracker::check_for_leaks() to determine, if there are any wrapper objects alive. If so,
  *  brief info on each such instance will be printed out to stdout.
  *
- *  Object Tracker is thread-safe.
+ *  Object Tracker is not thread-safe at the moment.
  **/
 #ifndef MISC_OBJECT_TRACKER_H
 #define MISC_OBJECT_TRACKER_H
 
-#include <unordered_map>
 #include <vector>
-#include "misc/callbacks.h"
 #include "misc/types.h"
 
 namespace Anvil
 {
-    typedef enum
-    {
-        /* Callback issued when a new GLSLShaderToSPIRVGenerator object is instantiated
-         *
-         * @param callback_arg OnObjectRegisteredCallbackArgument structure instance
-         */
-        OBJECT_TRACKER_CALLBACK_ID_ON_GLSL_SHADER_TO_SPIRV_GENERATOR_OBJECT_REGISTERED,
-
-        /* Callback issued when a new ShaderModule object is instantiated
-         *
-         * @param callback_arg OnObjectRegisteredCallbackArgument structure instance
-         */
-        OBJECT_TRACKER_CALLBACK_ID_ON_SHADER_MODULE_OBJECT_REGISTERED,
-
-        /* Callback issued when an existing Device object instance is about to go out of scope.
-         *
-         * This callback IS issued BEFORE a corresponding Vulkan handle is destroyed.
-         *
-         * This callback MAY be issued FROM WITHIN the object's destructor, implying all WEAK POINTERS pointing
-         * to the wrapper instance will have been expired at the time of the callback.
-         *
-         * @param callback_arg OnObjectAboutToBeUnregisteredCallbackArgument structure instance
-         **/
-        OBJECT_TRACKER_CALLBACK_ID_ON_DEVICE_OBJECT_ABOUT_TO_BE_UNREGISTERED,
-
-        /* Callback issued when an existing GLSLShaderToSPIRVGenerator object instance is about to go out of scope.
-         *
-         * This callback IS issued BEFORE a corresponding Vulkan handle is destroyed.
-         *
-         * This callback MAY be issued FROM WITHIN the object's destructor, implying all WEAK POINTERS pointing
-         * to the wrapper instance will have been expired at the time of the callback.
-         *
-         * @param callback_arg OnObjectAboutToBeUnregisteredCallbackArgument structure instance
-         **/
-        OBJECT_TRACKER_CALLBACK_ID_ON_GLSL_SHADER_TO_SPIRV_GENERATOR_OBJECT_ABOUT_TO_BE_UNREGISTERED,
-
-        /* Callback issued when an existing PipelineLayout object instance is about to go out of scope.
-         *
-         * This callback IS issued BEFORE a corresponding Vulkan handle is destroyed.
-         *
-         * This callback MAY be issued FROM WITHIN the object's destructor, implying all WEAK POINTERS pointing
-         * to the wrapper instance will have been expired at the time of the callback.
-         *
-         * @param callback_arg OnObjectAboutToBeUnregisteredCallbackArgument structure instance
-         **/
-        OBJECT_TRACKER_CALLBACK_ID_ON_PIPELINE_LAYOUT_OBJECT_ABOUT_TO_BE_UNREGISTERED,
-
-        /* Callback issued when an existing ShaderModule object instance is about to go out of scope.
-         *
-         * This callback IS issued BEFORE a corresponding Vulkan handle is destroyed.
-         *
-         * This callback MAY be issued FROM WITHIN the object's destructor, implying all WEAK POINTERS pointing
-         * to the wrapper instance will have been expired at the time of the callback.
-         *
-         * @param callback_arg OnObjectAboutToBeUnregisteredCallbackArgument structure instance
-         **/
-        OBJECT_TRACKER_CALLBACK_ID_ON_SHADER_MODULE_OBJECT_ABOUT_TO_BE_UNREGISTERED,
-
-        OBJECT_TRACKER_CALLBACK_ID_COUNT,
-    } ObjectTrackerCallbackID;
-
-    class ObjectTracker : public CallbacksSupportProvider
+    class ObjectTracker
     {
     public:
+        /* Public type declarations */
+        typedef enum
+        {
+            /* NOTE: If new entries are added or existing entry order is modified, make sure to
+             *       update get_object_type_name().
+             */
+            OBJECT_TYPE_FIRST,
+
+            OBJECT_TYPE_BUFFER = OBJECT_TYPE_FIRST,
+            OBJECT_TYPE_BUFFER_VIEW,
+            OBJECT_TYPE_COMMAND_BUFFER,
+            OBJECT_TYPE_COMMAND_POOL,
+            OBJECT_TYPE_COMPUTE_PIPELINE_MANAGER,
+            OBJECT_TYPE_DESCRIPTOR_POOL,
+            OBJECT_TYPE_DESCRIPTOR_SET,
+            OBJECT_TYPE_DESCRIPTOR_SET_GROUP,
+            OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT,
+            OBJECT_TYPE_DEVICE,
+            OBJECT_TYPE_EVENT,
+            OBJECT_TYPE_FENCE,
+            OBJECT_TYPE_FRAMEBUFFER,
+            OBJECT_TYPE_GRAPHICS_PIPELINE_MANAGER,
+            OBJECT_TYPE_IMAGE,
+            OBJECT_TYPE_IMAGE_VIEW,
+            OBJECT_TYPE_INSTANCE,
+            OBJECT_TYPE_MEMORY_BLOCK,
+            OBJECT_TYPE_PHYSICAL_DEVICE,
+            OBJECT_TYPE_PIPELINE_CACHE,
+            OBJECT_TYPE_PIPELINE_LAYOUT,
+            OBJECT_TYPE_PIPELINE_LAYOUT_MANAGER,
+            OBJECT_TYPE_QUERY_POOL,
+            OBJECT_TYPE_QUEUE,
+            OBJECT_TYPE_RENDER_PASS,
+            OBJECT_TYPE_RENDERING_SURFACE,
+            OBJECT_TYPE_SAMPLER,
+            OBJECT_TYPE_SEMAPHORE,
+            OBJECT_TYPE_SHADER_MODULE,
+            OBJECT_TYPE_SWAPCHAIN,
+
+            /* Always last */
+            OBJECT_TYPE_COUNT
+        } ObjectType;
+
         /* Public functions */
 
         /** Destroys the ObjectTracker singleton, no matter how many preceding get() calls have been made. */
@@ -126,29 +106,23 @@ namespace Anvil
          **/
         void check_for_leaks() const;
 
-        /** Retrieves an alive object of user-specified type at given index. */
-        void* get_object_at_index(const ObjectType& in_object_type,
-                                  uint32_t          in_alloc_index) const;
-
         /** Registers a new object of the specified type.
          *
-         *  @param in_object_type Wrapper object type.
-         *  @param in_object_ptr  Object instance. The object is NOT retained.
+         *  @param object_type Wrapper object type.
+         *  @param object_ptr  Object instance. The object is NOT retained.
          **/
-        void register_object(const ObjectType& in_object_type,
-                             void*             in_object_ptr);
+        void register_object(ObjectType object_type,
+                             void*      object_ptr);
 
         /** Stops tracking the specified object.
          *
-         *  For Vulkan object wrappers, this function MUST be called prior to actual release of the Vulkan object!
-         *
-         *  @param in_object_type Wrapper object type.
-         *  @param in_object_ptr  Object instance. The object is NOT released. The object must have
-         *                        been registered earlier with a register_object() call, or else an
-         *                        assertion failure will occur.
+         *  @param object_type Wrapper object type.
+         *  @param object_ptr  Object instance. The object is NOT released. The object must have
+         *                     been registered earlier with a register_object() call, or else an
+         *                     assertion failure will occur.
          **/
-        void unregister_object(const ObjectType& in_object_type,
-                               void*             in_object_ptr);
+        void unregister_object(ObjectType object_type,
+                               void*      object_ptr);
 
     private:
         /* Private type declarations */
@@ -156,13 +130,13 @@ namespace Anvil
 
         typedef struct ObjectAllocation
         {
-            uint32_t n_allocation;
-            void*    object_ptr;
+            uint32_t    n_allocation;
+            const void* object_ptr;
 
             /** Dummy constructor. Should only be used by STL */
             ObjectAllocation()
             {
-                n_allocation = UINT32_MAX;
+                n_allocation = -1;
                 object_ptr   = nullptr;
             }
 
@@ -171,8 +145,8 @@ namespace Anvil
              *  @param in_n_allocation Index of the memory allocation.
              *  @param in_object_ptr   Pointer to the object.
              */
-            ObjectAllocation(uint32_t in_n_allocation,
-                             void*    in_object_ptr)
+            ObjectAllocation(uint32_t    in_n_allocation,
+                             const void* in_object_ptr)
             {
                 n_allocation = in_n_allocation;
                 object_ptr   = in_object_ptr;
@@ -192,13 +166,11 @@ namespace Anvil
         ObjectTracker           (const ObjectTracker&);
         ObjectTracker& operator=(const ObjectTracker&);
 
-        const char* get_object_type_name(const ObjectType& in_object_type) const;
+        const char* get_object_type_name(ObjectType object_type) const;
 
         /* Private members */
-        mutable std::mutex m_cs;
-
-        mutable std::map<Anvil::ObjectType, ObjectAllocations>  m_object_allocations;
-        std::map<Anvil::ObjectType, uint32_t>                   m_n_objects_allocated_array;
+        ObjectAllocations m_object_allocations       [OBJECT_TYPE_COUNT];
+        uint32_t          m_n_objects_allocated_array[OBJECT_TYPE_COUNT];
     };
 }; /* namespace Anvil */
 

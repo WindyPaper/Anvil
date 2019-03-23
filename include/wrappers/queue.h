@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2017-2018 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2016 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -30,119 +30,38 @@
 #ifndef WRAPPERS_QUEUE_H
 #define WRAPPERS_QUEUE_H
 
-#include "misc/callbacks.h"
 #include "misc/debug.h"
-#include "misc/debug_marker.h"
-#include "misc/mt_safety.h"
 #include "misc/types.h"
 
 namespace Anvil
 {
-    /** TODO */
-    typedef struct LocalModePresentationItem
-    {
-        /* Tells which physical device's swapchain image at index @param in_swapchain_image_index should be presented. */
-        const Anvil::PhysicalDevice* physical_device_ptr;
-
-        uint32_t          swapchain_image_index;
-        Anvil::Swapchain* swapchain_ptr;
-
-        LocalModePresentationItem()
-        {
-            swapchain_image_index = ~0u;
-            swapchain_ptr         = nullptr;
-        }
-    } LocalModePresentationItem;
-
-    /** TODO */
-    typedef struct SumModePresentationItem
-    {
-        uint32_t                            n_physical_devices;
-        const Anvil::PhysicalDevice* const* physical_devices_ptr;
-        uint32_t                            swapchain_image_index;
-        Anvil::Swapchain*                   swapchain_ptr;
-
-        SumModePresentationItem()
-        {
-            n_physical_devices    = ~0u;
-            physical_devices_ptr  = nullptr;
-            swapchain_image_index = ~0u;
-            swapchain_ptr         = nullptr;
-        }
-    } SumModePresentationItem;
-
-    /** TODO */
-    typedef SumModePresentationItem LocalMultiDeviceModePresentationItem;
-
-    /** TODO */
-    typedef LocalModePresentationItem RemoteModePresentationItem;
-
-    typedef enum
-    {
-        /* Notification fired right after vkQueuePresentKHR() has been issued for a swapchain.
-         *
-         * callback_arg: Pointer to OnPresentRequestIssuedCallbackArgument instance.
-         */
-        QUEUE_CALLBACK_ID_PRESENT_REQUEST_ISSUED,
-
-        QUEUE_CALLBACK_ID_COUNT
-    } QueueCallbacKID;
-
-    class Queue : public CallbacksSupportProvider,
-                  public DebugMarkerSupportProvider<Queue>,
-                  public MTSafetySupportProvider
+    class Queue
     {
     public:
         /* Public functions */
 
         /** Initializes a new Vulkan queue instance.
          *
-         *  NOTE: This function must only be used by Anvil::*Device!
+         *  After construction, set_swapchain() should be called individually
+         *  to assign a swapchain to the queue. This is necessary in order for
+         *  present() calls to work correctly.
          *
-         *  @param in_device_ptr         Device to retrieve the queue from.
-         *  @param in_queue_family_index Index of the queue family to retrieve the queue from.
-         *  @param in_queue_index        Index of the queue to retrieve.
-         *  @param in_mt_safe            True if queue submissions should be protected by a mutex, guaranteeing
-         *                               no more than one thread at a time will ever submit a cmd buffer to the
-         *                               same cmd queue.
-         *  @param in_global_priority    Global priority of the new queue. Setting this value to anything else than Anvil::QueueGlobalPriority::MEDIUM_EXT
-         *                               requires VK_EXT_queue_global_priority support.
+         *  @param device_ptr             Device to retrieve the queue from.
+         *  @param queue_family_index     Index of the queue family to retrieve the queue from.
+         *  @param queue_index            Index of the queue to retrieve.
+         *  @param pfn_queue_present_proc Func pointer to device-specific implementation of vkQueuePresentKHR().
+         *                                Must not be nullptr.
          **/
-        static std::unique_ptr<Anvil::Queue> create(const Anvil::BaseDevice*          in_device_ptr,
-                                                    uint32_t                          in_queue_family_index,
-                                                    uint32_t                          in_queue_index,
-                                                    bool                              in_mt_safe,
-                                                    const Anvil::QueueGlobalPriority& in_global_priority = Anvil::QueueGlobalPriority::MEDIUM_EXT);
+        Queue(Anvil::Device*        device_ptr,
+              uint32_t              queue_family_index,
+              uint32_t              queue_index,
+              PFN_vkQueuePresentKHR pfn_queue_present_proc);
 
         /** Destructor */
-        virtual ~Queue();
-
-        /** Starts a queue debug label region. App must call end_debug_utils_label() for the same queue instance
-         *  at some point to declare the end of the label region.
-         *
-         *  Requires VK_EXT_debug_utils support. Otherwise, the call is moot.
-         *
-         *  @param in_label_name_ptr Meaning as per VkDebugUtilsLabelEXT::pLabelName. Must not be nullptr.
-         *  @param in_color_vec4_ptr Meaning as per VkDebugUtilsLabelEXT::color. Must not be nullptr.
-         */
-        void begin_debug_utils_label(const char*  in_label_name_ptr,
-                                     const float* in_color_vec4_ptr);
-
-        /** Updates sparse resource memory bindings using this queue.
-         *
-         *  @param in_update Detailed information about the update to be carried out.
-         **/
-        bool bind_sparse_memory(Anvil::SparseMemoryBindingUpdateInfo& in_update);
-
-        /** Ends a queue debug label region. Requires a preceding begin_debug_utils_label() call.
-         *
-         *  Requires VK_EXT_debug_utils support. Otherwise, the call is moot.
-         *
-         */
-        void end_debug_utils_label();
+        ~Queue();
 
         /** Retrieves parent device instance */
-        const Anvil::BaseDevice* get_parent_device() const
+        const Anvil::Device* get_parent_device() const
         {
             return m_device_ptr;
         }
@@ -159,196 +78,192 @@ namespace Anvil
             return m_queue_family_index;
         }
 
-        /** Retrieves global priority used to create the queue.
+        /** Presents the specified swapchain image using this queue.
          *
-         *  Only meaningful if VK_EXT_queue_global_priority if supported.
-         */
-        const Anvil::QueueGlobalPriority& get_queue_global_priority() const
+         *  This call will only succeed if supports_presentation() returns true.
+         *
+         *  @param swapchain_image_index Index of the swapchain image to present.
+         *  @param n_wait_semaphores     Number of semaphores defined under @param wait_semaphore_ptrs. These sems will
+         *                               be waited on before presentation occurs.
+         *  @param wait_semaphore_pts    An array of @param n_wait_semaphores semaphore wrapper instances. May be nullptr
+         *                               if @param n_wait_semaphores is 0.
+         **/
+        void present(uint32_t          swapchain_image_index,
+                     uint32_t          n_wait_semaphores,
+                     Anvil::Semaphore* wait_semaphore_ptrs);
+
+        /** Assigns the specified swapchain to the queue and checks if the queue can be used
+         *  for presentation.
+         *
+         *  This call must be only made once throughout queue wrapper lifetime.
+         *
+         *  @param swapchain_ptr Swapchain instance to use. Must not be nullptr.
+         **/
+        void set_swapchain(Anvil::Swapchain* swapchain_ptr);
+
+        /** Tells whether the queue can be used to present a swapchain image.
+         *
+         *  It is required for a swapchain to be assigned to the queue via the set_swapchain()
+         *  call, before this function can be called.
+         *
+         *  @return true if the queue can be used for presentation, false otherwise.
+         **/
+        const bool supports_presentation() const
         {
-            return m_queue_global_priority;
+            anvil_assert(m_swapchain_ptr != nullptr);
+
+            return m_supports_presentation;
         }
 
-        /** Retrieves index of the queue */
-        uint32_t get_queue_index() const
+        /** Waits on the semaphores specified by the user, executes user-defined command buffers,
+         *  and then signals the semaphores passed by arguments. If a non-nullptr fence is specified,
+         *  the function will also wait on the call to finish GPU-side before returning.
+         *
+         *  It is valid to specify 0 command buffers or signal/wait semaphores, in which case
+         *  these steps will be skipped.
+         *
+         *  If @param should_block is true and @param opt_fence_ptr is nullptr, the function will create
+         *  a new fence, wait on it, and then release it prior to leaving. This may come at a performance cost.
+         *
+         *  @param n_command_buffers                 Number of command buffers under @param opt_cmd_buffer_ptrs
+         *                                             which should be executed. May be 0.
+         *  @param opt_cmd_buffer_ptrs                 Array of command buffers to execute. Can be nullptr if
+         *                                             @param n_command_buffers is 0.
+         *  @param n_semaphores_to_signal              Number of semaphores to signal after command buffers finish
+         *                                             executing. May be 0.
+         *  @param opt_semaphore_to_signal_ptr_ptrs    Array of semaphores to signal after execution. May be nullptr if
+         *                                             @param n_semaphores_to_signal is 0.
+         *  @param n_semaphores_to_wait_on             Number of semaphores to wait on before executing command buffers.
+         *                                             May be 0.
+         *  @param opt_semaphore_to_wait_on_ptr_ptrs   Array of semaphores to wait on prior to execution. May be nullptr
+         *                                             if @param n_semaphores_to_wait_on is 0.
+         *  @param opt_dst_stage_masks_to_wait_on_ptrs Array of size @param n_semaphores_to_wait_on, specifying stages
+         *                                             at which the wait ops should be performed. May be nullptr if
+         *                                             @param n_semaphores_to_wait_on is 0.
+         *  @param should_block                        true if the function should wait for the scheduled commands to
+         *                                             finish executing, false otherwise.
+         *  @param opt_fence_ptr                       Fence to use when submitting the comamnd buffers to the queue.
+         *                                             The fence will be waited on if @param should_block is true.
+         *                                             If @param should_block is false, the fence will be passed at
+         *                                             submit call time, but will not be waited on.
+         **/
+        void submit_command_buffers(uint32_t                               n_command_buffers,
+                                    const Anvil::CommandBufferBase* const* opt_cmd_buffer_ptrs,
+                                    uint32_t                               n_semaphores_to_signal,
+                                    const Anvil::Semaphore* const*         opt_semaphore_to_signal_ptr_ptrs,
+                                    uint32_t                               n_semaphores_to_wait_on,
+                                    const Anvil::Semaphore* const*         opt_semaphore_to_wait_on_ptr_ptrs,
+                                    const VkPipelineStageFlags*            opt_dst_stage_masks_to_wait_on_ptrs,
+                                    bool                                   should_block,
+                                    Anvil::Fence*                          opt_fence_ptr                = nullptr);
+
+        /** Submits specified command buffer to the queue. Can optionally wait until the execution finishes.
+         *
+         *  For argument discussion, please see submit_command_buffers() documentation
+         **/
+        void submit_command_buffer(const Anvil::CommandBufferBase* cmd_buffer_ptr,
+                                   bool                            should_block,
+                                   Anvil::Fence*                   opt_fence_ptr = nullptr)
         {
-            return m_queue_index;
+            submit_command_buffers(1,       /* n_command_buffers */
+                                  &cmd_buffer_ptr,
+                                   0,       /* n_semaphores_to_signal    */
+                                   nullptr, /* semaphore_to_signal_ptrs  */
+                                   0,       /* n_semaphoires_to_wait_on  */
+                                   nullptr, /* semaphore_to_wait_on_ptrs */
+                                   nullptr,
+                                   should_block,
+                                   opt_fence_ptr);
         }
 
-        /** Inserts a single queue debug label.
+        /** Submits specified command buffer to the queue. After the command buffer finishes executing
+         *  GPU-side, user-specified semaphores will be signalled.
          *
-         *  Requires VK_EXT_debug_utils support. Otherwise, the call is moot.
+         *  Can optionally wait until the execution finishes.
          *
-         *  @param in_label_name_ptr Meaning as per VkDebugUtilsLabelEXT::pLabelName. Must not be nullptr.
-         *  @param in_color_vec4_ptr Meaning as per VkDebugUtilsLabelEXT::color. Must not be nullptr.
-         */
-        void insert_debug_utils_label(const char*  in_label_name_ptr,
-                                      const float* in_color_vec4_ptr);
-
-        /** Presents the specified swapchain image using this queue. This queue must support presentation
-         *  for the swapchain's rendering surface in order for this call to succeed.
-         *
-         *  This function will only succeed if supports_presentation() returns true.
-         *  This function will only succeed if used for a single-GPU device instance.
-         *
-         *  NOTE: If you are presenting to an off-screen window, make sure to transition
-         *        the image to Anvil::ImageLayout::GENERAL, instead of Anvil::ImageLayout::PRESENT_SRC_KHR.
-         *        In off-screen rendering mode, swapchain images are actually regular images, so
-         *        presentable layout is not supported.
-         *
-         *  @param in_swapchain_ptr           Swapchain to use for the operation. Must not be NULL.
-         *  @param in_swapchain_image_index   Index of the swapchain image to present.
-         *  @param in_n_wait_semaphores       Number of semaphores defined under @param in_wait_semaphore_ptrs. These sems will
-         *                                    be waited on before presentation occurs.
-         *  @param in_wait_semaphore_ptrs_ptr Ptr to an array of @param in_n_wait_semaphores semaphore wrapper instances. May be nullptr
-         *                                    if @param in_n_wait_semaphores is 0.
-         *
-         *  @return Vulkan result for the operation.
+         *  For argument discussion, please see submit_command_buffers() documentation
          **/
-        bool present(Anvil::Swapchain*                   in_swapchain_ptr,
-                     uint32_t                            in_swapchain_image_index,
-                     uint32_t                            in_n_wait_semaphores,
-                     Anvil::Semaphore* const*            in_wait_semaphore_ptrs_ptr,
-                     Anvil::SwapchainOperationErrorCode* out_present_results_ptr);
-
-        /** See present() documentation for general information about this function.
-         *
-         *  This function can be called for both single-GPU and multi-GPU devices.
-         *
-         *  @param in_n_local_mode_presentation_items TODO
-         *  @param in_local_mode_presentation_items   TODO
-         *  @param in_n_wait_semaphores               TODO
-         *  @param in_wait_semaphore_ptrs_ptr         TODO
-         *
-         *  @return TODO
-         **/
-        bool present_in_local_presentation_mode(uint32_t                            in_n_local_mode_presentation_items,
-                                                const LocalModePresentationItem*    in_local_mode_presentation_items,
-                                                uint32_t                            in_n_wait_semaphores,
-                                                Anvil::Semaphore* const*            in_wait_semaphore_ptrs_ptr,
-                                                Anvil::SwapchainOperationErrorCode* out_present_results_ptr);
-
-        /** See present() documentation for general information about this function.
-         *
-         *  This function can be called for both single-GPU and multi-GPU devices.
-         *
-         *  @param in_n_local_multi_device_mode_presentation_items TODO
-         *  @param in_local_multi_device_mode_presentation_items   TODO
-         *  @param in_n_wait_semaphores                            TODO
-         *  @param in_wait_semaphore_ptrs_ptr                      TODO
-         *
-         *  @return TODO
-         **/
-        bool present_in_local_multi_device_presentation_mode(uint32_t                                    in_n_local_multi_device_mode_presentation_items,
-                                                             const LocalMultiDeviceModePresentationItem* in_local_multi_device_mode_presentation_items,
-                                                             uint32_t                                    in_n_wait_semaphores,
-                                                             Anvil::Semaphore* const*                    in_wait_semaphore_ptrs_ptr,
-                                                             Anvil::SwapchainOperationErrorCode*         out_present_results_ptr);
-
-        /** See present() documentation for general information about this function.
-         *
-         *  This function can be called for multi-GPU devices.
-         *
-         *  @param in_n_remote_mode_presentation_items TODO
-         *  @param in_remote_mode_presentation_items   TODO
-         *  @param in_n_wait_semaphores                TODO
-         *  @param in_wait_semaphore_ptrs_ptr          TODO
-         *
-         *  @return TODO
-         **/
-        bool present_in_remote_presentation_mode(uint32_t                            in_n_remote_mode_presentation_items,
-                                                 const RemoteModePresentationItem*   in_remote_mode_presentation_items,
-                                                 uint32_t                            in_n_wait_semaphores,
-                                                 Anvil::Semaphore* const*            in_wait_semaphore_ptrs_ptr,
-                                                 Anvil::SwapchainOperationErrorCode* out_present_results_ptr);
-
-        /** See present() documentation for general information about this function.
-         *
-         *  This function can be called for multi-GPU devices.
-         *
-         *  @param in_n_sum_mode_presentation_items TODO
-         *  @param in_sum_mode_presentation_items   TODO
-         *  @param in_n_wait_semaphores             TODO
-         *  @param in_wait_semaphore_ptrs_ptr       TODO
-         *
-         *  @return TODO
-         **/
-        bool present_in_sum_presentation_mode(uint32_t                            in_n_sum_mode_presentation_items,
-                                              const SumModePresentationItem*      in_sum_mode_presentation_items,
-                                              uint32_t                            in_n_wait_semaphores,
-                                              Anvil::Semaphore* const*            in_wait_semaphore_ptrs_ptr,
-                                              Anvil::SwapchainOperationErrorCode* out_present_results_ptr);
-
-        bool submit(const SubmitInfo& in_submit_info);
-
-        /** Tells whether the queue supports protected memory operations */
-        bool supports_protected_memory_operations() const
+        void submit_command_buffer_with_signal_semaphores(const Anvil::CommandBufferBase* cmd_buffer_ptr,
+                                                          uint32_t                        n_semaphores_to_signal,
+                                                          const Anvil::Semaphore* const*  semaphore_to_signal_ptr_ptrs,
+                                                          bool                            should_block,
+                                                          Anvil::Fence*                   opt_fence_ptr                = nullptr)
         {
-            return m_supports_protected_memory_operations;
+            submit_command_buffers(1,                       /* n_command_buffers */
+                                  &cmd_buffer_ptr,
+                                   n_semaphores_to_signal,
+                                   semaphore_to_signal_ptr_ptrs,
+                                   0,                       /* n_semaphores_to_wait_on             */
+                                   nullptr,                 /* semaphore_to_wait_on_ptr_ptrs       */
+                                   nullptr,                 /* opt_dst_stage_masks_to_wait_on_ptrs */
+                                   should_block,
+                                   opt_fence_ptr);
         }
 
-        /** Tells whether the queue supports sparse bindings */
-        bool supports_sparse_bindings() const
+        /** Waits on the user-specified semaphores and submits specified command buffer to the queue.
+         *  After the command buffer finishes executing GPU-side, user-specified semaphores will be
+         *  signalled.
+         *
+         *  Can optionally wait until the execution finishes.
+         *
+         *  For argument discussion, please see submit_command_buffers() documentation
+         **/
+        void submit_command_buffer_with_signal_wait_semaphores(const Anvil::CommandBufferBase* cmd_buffer_ptr,
+                                                               uint32_t                        n_semaphores_to_signal,
+                                                               const Anvil::Semaphore* const*  semaphore_to_signal_ptr_ptrs,
+                                                               uint32_t                        n_semaphores_to_wait_on,
+                                                               const Anvil::Semaphore* const*  semaphore_to_wait_on_ptr_ptrs,
+                                                               const VkPipelineStageFlags*     dst_stage_masks_to_wait_on_ptrs,
+                                                               bool                            should_block,
+                                                               Anvil::Fence*                   opt_fence_ptr                = nullptr)
         {
-            return m_supports_sparse_bindings;
+            submit_command_buffers(1,                       /* n_command_buffers */
+                                  &cmd_buffer_ptr,
+                                   n_semaphores_to_signal,
+                                   semaphore_to_signal_ptr_ptrs,
+                                   n_semaphores_to_wait_on,
+                                   semaphore_to_wait_on_ptr_ptrs,
+                                   dst_stage_masks_to_wait_on_ptrs,
+                                   should_block,
+                                   opt_fence_ptr);
         }
 
-        void wait_idle();
-
+        /** Waits on the user-specified semaphores and submits specified command buffer to the queue.
+         *
+         *  Can optionally wait until the execution finishes.
+         *
+         *  For argument discussion, please see submit_command_buffers() documentation
+         **/
+        void submit_command_buffer_with_wait_semaphores(const Anvil::CommandBufferBase* cmd_buffer_ptr,
+                                                        uint32_t                        n_semaphores_to_wait_on,
+                                                        const Anvil::Semaphore* const*  semaphore_to_wait_on_ptr_ptrs,
+                                                        const VkPipelineStageFlags*     dst_stage_masks_to_wait_on_ptrs,
+                                                        bool                            should_block,
+                                                        Anvil::Fence*                   opt_fence_ptr                = nullptr)
+        {
+            submit_command_buffers(1,                      /* n_command_buffers */
+                                  &cmd_buffer_ptr,
+                                   0,                      /* n_semaphores_to_signal       */
+                                   nullptr,                /* semaphore_to_signal_ptr_ptrs */
+                                   n_semaphores_to_wait_on,
+                                   semaphore_to_wait_on_ptr_ptrs,
+                                   dst_stage_masks_to_wait_on_ptrs,
+                                   should_block,
+                                   opt_fence_ptr);
+        }
     private:
         /* Private functions */
-        bool present_internal   (Anvil::DeviceGroupPresentModeFlagBits in_presentation_mode,
-                                 uint32_t                              in_n_swapchains,
-                                 Anvil::Swapchain* const*              in_swapchains,
-                                 const uint32_t*                       in_swapchain_image_indices,
-                                 const uint32_t*                       in_device_masks,
-                                 uint32_t                              in_n_wait_semaphores,
-                                 Anvil::Semaphore* const*              in_wait_semaphore_ptrs,
-                                 Anvil::SwapchainOperationErrorCode*   out_present_results_ptr);
-        void present_lock_unlock(uint32_t                              in_n_swapchains,
-                                 const Anvil::Swapchain* const*        in_swapchains,
-                                 uint32_t                              in_n_wait_semaphores,
-                                 Anvil::Semaphore* const*              in_wait_semaphore_ptrs,
-                                 bool                                  in_should_lock);
-
-        void bind_sparse_memory_lock_unlock    (Anvil::SparseMemoryBindingUpdateInfo& in_update,
-                                                bool                                  in_should_lock);
-        void submit_command_buffers_lock_unlock(uint32_t                              in_n_command_buffers,
-                                                Anvil::CommandBufferBase* const*      in_opt_cmd_buffer_ptrs_ptr,
-                                                uint32_t                              in_n_semaphores_to_signal,
-                                                Anvil::Semaphore* const*              in_opt_semaphore_to_signal_ptrs_ptr,
-                                                uint32_t                              in_n_semaphores_to_wait_on,
-                                                Anvil::Semaphore* const*              in_opt_semaphore_to_wait_on_ptrs_ptr,
-                                                Anvil::Fence*                         in_opt_fence_ptr,
-                                                bool                                  in_should_lock);
-        void submit_command_buffers_lock_unlock(uint32_t                              in_n_command_buffer_submissions,
-                                                const CommandBufferMGPUSubmission*    in_opt_command_buffer_submissions_ptr,
-                                                uint32_t                              in_n_signal_semaphore_submissions,
-                                                const SemaphoreMGPUSubmission*        in_opt_signal_semaphore_submissions_ptr,
-                                                uint32_t                              in_n_wait_semaphore_submissions,
-                                                const SemaphoreMGPUSubmission*        in_opt_wait_semaphore_submissions_ptr,
-                                                Anvil::Fence*                         in_opt_fence_ptr,
-                                                bool                                  in_should_lock);
-
-        /* Constructor. Please see create() for specification */
-        Queue(const Anvil::BaseDevice*          in_device_ptr,
-              uint32_t                          in_queue_family_index,
-              uint32_t                          in_queue_index,
-              bool                              in_mt_safe,
-              const Anvil::QueueGlobalPriority& in_global_priority);
-
         Queue          (const Queue&);
         Queue operator=(const Queue&);
 
         /* Private variables */
-        const Anvil::BaseDevice*         m_device_ptr;
-        uint32_t                         m_n_debug_label_regions_started;
-        VkQueue                          m_queue;
-        const uint32_t                   m_queue_family_index;
-        const Anvil::QueueGlobalPriority m_queue_global_priority;
-        const uint32_t                   m_queue_index;
-        Anvil::FenceUniquePtr            m_submit_fence_ptr;
-        bool                             m_supports_protected_memory_operations;
-        bool                             m_supports_sparse_bindings;
+        Anvil::Device*        m_device_ptr;
+        Anvil::Swapchain*     m_swapchain_ptr;
+        VkQueue               m_queue;
+        uint32_t              m_queue_family_index;
+        uint32_t              m_queue_index;
+        bool                  m_supports_presentation;
+        PFN_vkQueuePresentKHR m_vkQueuePresentKHR;
     };
 }; /* namespace Anvil */
 

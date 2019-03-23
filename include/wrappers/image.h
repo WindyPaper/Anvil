@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2017-2018 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2016 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -29,588 +29,497 @@
 #ifndef WRAPPERS_IMAGE_H
 #define WRAPPERS_IMAGE_H
 
-#include "misc/callbacks.h"
-#include "misc/debug_marker.h"
-#include "misc/mt_safety.h"
+#include "misc/ref_counter.h"
 #include "misc/types.h"
-#include "misc/page_tracker.h"
-#include <unordered_map>
-
 
 namespace Anvil
 {
-    /* Enumerates available image call-back types. */
-    enum ImageCallbackID
+    /** Defines dimensions of a single image mip-map */
+    typedef struct Mipmap
     {
-        /* Call-back issued by sparse image instances whenever the image needs to check if
-         * there are any pending alloc operations for this image instance. Any recipient
-         * should set callback_arg::result to true in case a bake operation *would* assign
-         * new pages to the image instance. If no allocs are scheduled, the bool value MUST
-         * be left untouched.
-         *
-         * This call-back is needed for memory allocator to support implicit bake operations
-         * for sparse images.
-         *
-         * callback_arg: Pointer to IsImageMemoryAllocPendingQueryCallbackArgument instance.
-         **/
-        IMAGE_CALLBACK_ID_IS_ALLOC_PENDING,
+        uint32_t depth;
+        uint32_t height;
+        uint32_t width;
 
-        /* Call-back issued when no memory block is assigned to the image wrapper instance and
-         * someone has just requested it.
-         *
-         * This call-back is needed for memory allocator to support implicit bake operations.
-         *
-         * callback_arg: Pointer to OnMemoryBlockNeededForImageCallbackArgument instance.
-         **/
-        IMAGE_CALLBACK_ID_MEMORY_BLOCK_NEEDED,
+        Mipmap(uint32_t in_width,
+               uint32_t in_height,
+               uint32_t in_depth)
+        {
+            depth  = in_depth;
+            height = in_height;
+            width  = in_width;
+        }
+    } Mipmap;
 
-        /* Always last */
-        IMAGE_CALLBACK_ID_COUNT
-    };
+    /** Defines data for a single image mip-map.
+     *
+     *  Use one of the static create_() functions to set up structure fields according to the target
+     *  image type.
+     **/
+    typedef struct MipmapRawData
+    {
+        /* Image aspect the mip-map data is specified for. */
+        VkImageAspectFlagBits aspect;
+
+        /* Start layer index */
+        uint32_t n_layer;
+
+        /* Number of layers to update */
+        uint32_t n_layers;
+
+        /* Number of 3D texture slices to update. For non-3D texture types, this field
+         * should be set to 1. */
+        uint32_t n_slices;
+
+
+        /* Index of the mip-map to update. */
+        uint32_t  n_mipmap;
+
+
+        /* Pointer to a buffer holding raw data representation. The data structure is characterized by
+         * data_size, row_size and slice_size fields.
+         *
+         * It is assumed the data under the pointer is tightly packed, and stored in column->row->slice->layer
+         * order.
+         */
+        const void* linear_tightly_packed_data_ptr;
+
+
+        /* Total number of bytes available for reading under linear_tightly_packed_data_ptr */
+        uint32_t data_size;
+
+        /* Number of bytes each row takes */
+        uint32_t row_size;
+
+
+        /** Creates a MipmapRawData instance which can be used to upload data to 1D Image instances:
+         *
+         *  @param in_aspect                         Image aspect to modify.
+         *  @param in_n_mipmap                       Index of the mipmap to be updated.
+         *  @param in_linear_tightly_packed_data_ptr Pointer to an array holding raw mip-map data.
+         *  @param in_row_size                       Number of bytes each texture row takes.
+         *
+         *  @return As per description.
+         **/
+        static MipmapRawData create_1d_texture_mipmap_raw_data(VkImageAspectFlagBits aspect,
+                                                               uint32_t              n_mipmap,
+                                                               const void*           linear_tightly_packed_data_ptr,
+                                                               uint32_t              row_size);
+
+        /** Creates a MipmapRawData instance which can be used to upload data to 1D Array Image instances:
+         *
+         *  @param in_aspect                         Image aspect to modify.
+         *  @param in_n_layer                        Index of a texture layer the mip-map data should be uploaded to.
+         *  @param in_n_layers                       Number of texture layers to be updated.
+         *  @param in_n_mipmap                       Index of the mipmap to be updated.
+         *  @param in_linear_tightly_packed_data_ptr Pointer to an array holding raw mip-map data.
+         *  @param in_row_size                       Number of bytes each texture row takes.
+         *  @param in_data_size                      Number of bytes available for reading under @param in_linear_tightly_packed_data_ptr.
+         *
+         *  @return As per description.
+         **/
+        static MipmapRawData create_1d_array_texture_mipmap_raw_data(VkImageAspectFlagBits in_aspect,
+                                                                     uint32_t              in_n_layer,
+                                                                     uint32_t              in_n_layers,
+                                                                     uint32_t              in_n_mipmap,
+                                                                     const void*           in_linear_tightly_packed_data_ptr,
+                                                                     uint32_t              in_row_size,
+                                                                     uint32_t              in_data_size);
+
+        /** Creates a MipmapRawData instance which can be used to upload data to 2D Image instances:
+         *
+         *  @param in_aspect                         Image aspect to modify.
+         *  @param in_n_mipmap                       Index of the mipmap to be updated.
+         *  @param in_linear_tightly_packed_data_ptr Pointer to an array holding raw mip-map data.
+         *  @param in_data_size                      Number of bytes available for reading under @param in_linear_tightly_packed_data_ptr.
+         *  @param in_row_size                       Number of bytes each texture row takes.
+         *
+         *  @return As per description.
+         **/
+        static MipmapRawData create_2d_texture_mipmap_raw_data(VkImageAspectFlagBits aspect,
+                                                               uint32_t              n_mipmap,
+                                                               const void*           linear_tightly_packed_data_ptr,
+                                                               uint32_t              data_size,
+                                                               uint32_t              row_size);
+
+        /** Creates a MipmapRawData instance which can be used to upload data to 2D Array Image instances:
+         *
+         *  @param in_aspect                         Image aspect to modify.
+         *  @param in_n_layer                        Index of a texture layer the mip-map data should be uploaded to.
+         *  @param in_n_layers                       Number of texture layers to be updated.
+         *  @param in_n_mipmap                       Index of the mipmap to be updated.
+         *  @param in_linear_tightly_packed_data_ptr Pointer to an array holding raw mip-map data.
+         *  @param in_data_size                      Number of bytes available for reading under @param in_linear_tightly_packed_data_ptr.
+         *  @param in_row_size                       Number of bytes each texture row takes.
+         *
+         *  @return As per description.
+         **/
+        static MipmapRawData create_2d_array_texture_mipmap_raw_data(VkImageAspectFlagBits aspect,
+                                                                     uint32_t              n_layer,
+                                                                     uint32_t              n_layers,
+                                                                     uint32_t              n_mipmap,
+                                                                     const void*           linear_tightly_packed_data_ptr,
+                                                                     uint32_t              data_size,
+                                                                     uint32_t              row_size);
+
+        /** Creates a MipmapRawData instnce which can be used to upload data to 3D Image instances:
+         *
+         *  @param in_aspect                         Image aspect to modify.
+         *  @param in_n_layer                        Index of a texture layer the mip-map data should be uploaded to.
+         *  @param in_n_slices                       Number of texture slices to be updated.
+         *  @param in_n_mipmap                       Index of the mipmap to be updated.
+         *  @param in_linear_tightly_packed_data_ptr Pointer to an array holding raw mip-map data.
+         *  @param in_data_size                      Number of bytes available for reading under @param in_linear_tightly_packed_data_ptr.
+         *  @param in_row_size                       Number of bytes each texture row takes.
+         *
+         *  @return As per description.
+         **/
+        static MipmapRawData create_3d_texture_mipmap_raw_data(VkImageAspectFlagBits aspect,
+                                                               uint32_t              n_layer,
+                                                               uint32_t              n_layer_slices,
+                                                               uint32_t              n_mipmap,
+                                                               const void*           linear_tightly_packed_data_ptr,
+                                                               uint32_t              data_size,
+                                                               uint32_t              row_size);
+
+        /** Creates a MipmapRawData instance which can be used to upload data to Cube Map Image instances:
+         *
+         *  @param aspect                         Image aspect to modify.
+         *  @param n_layer                        Index of a texture layer the mip-map data should be uploaded to.
+         *                                        Valid values and corresponding cube map faces: 0: -X, 1: -Y, 2: -Z, 3: +X, 4: +Y, 5: +Z
+         *  @param n_mipmap                       Index of the mipmap to be updated.
+         *  @param linear_tightly_packed_data_ptr Pointer to an array holding raw mip-map data.
+         *  @param data_size                      Number of bytes available for reading under @param in_linear_tightly_packed_data_ptr.
+         *  @param row_size                       Number of bytes each texture row takes.
+         *
+         *  @return As per description.
+         **/
+        static MipmapRawData create_cube_map_texture_mipmap_raw_data(VkImageAspectFlagBits aspect,
+                                                                     uint32_t              n_layer,
+                                                                     uint32_t              n_mipmap,
+                                                                     const void*           linear_tightly_packed_data_ptr,
+                                                                     uint32_t              data_size,
+                                                                     uint32_t              row_size);
+
+        /** Creates a MipmapRawData instance which can be used to upload data to Cube Map Array Image instances:
+         *
+         *  @param aspect                         Image aspect to modify.
+         *  @param n_layer                        Index of a texture layer the mip-map data should be uploaded to.
+         *                                        Cube map faces, as selected for layer at index (n_layer % 6), are:
+         *                                        0: -X, 1: -Y, 2: -Z, 3: +X, 4: +Y, 5: +Z
+         *  @param n_layers                       Number of texture layers to update.
+         *  @param n_mipmap                       Index of the mipmap to be updated.
+         *  @param linear_tightly_packed_data_ptr Pointer to an array holding raw mip-map data.
+         *  @param data_size                      Number of bytes available for reading under @param in_linear_tightly_packed_data_ptr.
+         *  @param row_size                       Number of bytes each texture row takes.
+         *
+         *  @return As per description.
+         **/
+        static MipmapRawData create_cube_map_array_texture_mipmap_raw_data(VkImageAspectFlagBits aspect,
+                                                                           uint32_t              n_layer,
+                                                                           uint32_t              n_layers,
+                                                                           uint32_t              n_mipmap,
+                                                                           const void*           linear_tightly_packed_data_ptr,
+                                                                           uint32_t              data_size,
+                                                                           uint32_t              row_size);
+    } MipmapRawData;
 
     /** A wrapper class for a VkImage and the bound VkMemory object. */
-    class Image : public CallbacksSupportProvider,
-                  public DebugMarkerSupportProvider<Image>,
-                  public MTSafetySupportProvider
+    class Image : public RefCounterSupportProvider
     {
     public:
         /* Public functions */
 
-        static Anvil::ImageUniquePtr create(Anvil::ImageCreateInfoUniquePtr in_create_info_ptr);
-
-        /* Transitions the image from one layout to another.
+        /** Initializes a new Image instance *without* a memory backing. A memory region should be bound
+         *  to the object by calling Image::set_memory() before using the object for any operations.
          *
-         * This is a blocking call.
+         *  If this constructor is used, it is user's responsibility to transfer the image into the right layout
+         *  Having done so, set_creation_time_image_layout() should be called to update the image property.
          *
-         * @param in_queue_ptr                    Queue to use for the transition. The specified queue must support pipeline barrier
-         *                                        command. Must not be null.
-         * @param in_src_access_mask              Source access mask to use for the transition.
-         * @param in_src_layout                   Image layout to transfer from.
-         * @param in_dst_access_mask              Destination access mask to use for the transition.
-         * @param in_dst_layout                   Image layout to transfer to.
-         * @param in_subresource_range            Subresource range to use for the transfer operation.
-         * @param in_opt_n_wait_semaphores        Number of wait semaphores specified at @param in_opt_wait_semaphore_ptrs.
-         *                                        May be 0.
-         * @param in_opt_wait_dst_stage_mask_ptrs A raw array of wait destination stage masks, to be used at submission time. May be null if
-         *                                        @param in_opt_n_wait_semaphores is 0.
-         * @param in_opt_wait_semaphore_ptrs      A raw array of semaphores to wait on before proceeding with submission of a cmd buffer
-         *                                        which changes the layout of the image. May be null if @param in_opt_n_wait_semaphores is 0.
-         * @param in_opt_n_set_semaphores         Number of set semaphores specified at @param in_opt_set_semaphore_ptrs. May be 0.
-         * @param in_opt_set_semaphore_ptrs       A raw array of semaphores to set upon finished execution of the image layout transfer command buffer.
-         *                                        May be null if @param in_opt_n_set_semaphores is 0.
-         */
-        void change_image_layout(Anvil::Queue*                       in_queue_ptr,
-                                 Anvil::AccessFlags                  in_src_access_mask,
-                                 Anvil::ImageLayout                  in_src_layout,
-                                 Anvil::AccessFlags                  in_dst_access_mask,
-                                 Anvil::ImageLayout                  in_dst_layout,
-                                 const Anvil::ImageSubresourceRange& in_subresource_range,
-                                 const uint32_t                      in_opt_n_wait_semaphores        = 0,
-                                 const Anvil::PipelineStageFlags*    in_opt_wait_dst_stage_mask_ptrs = nullptr,
-                                 Anvil::Semaphore* const*            in_opt_wait_semaphore_ptrs      = nullptr,
-                                 const uint32_t                      in_opt_n_set_semaphores         = 0,
-                                 Anvil::Semaphore* const*            in_opt_set_semaphore_ptrs       = nullptr);
-
-
-        /** Destructor */
-        virtual ~Image();
-
-        /** Returns subresource layout for an aspect for user-specified mip of an user-specified layer.
+         *  @param device_ptr            Device to use.
+         *  @param type                  Vulkan image type to use.
+         *  @param format                Vulkan format to use.
+         *  @param tiling                Vulkan image tiling to use.
+         *  @param usage                 Vulkan image usage pattern to use.
+         *  @param base_mipmap_width     Width of the base mip-map.
+         *  @param base_mipmap_height    Height of the base mip-map. Must be at least 1 for all image types.
+         *  @param base_mipmap_depth     Depth of the base mip-map. Must be at least 1 for all image types.
+         *  @param n_layers              Number of layers to use. Must be at least 1 for all image types.
+         *  @param sample_count          Sample count to use.
+         *  @param use_full_mipmap_chain true, if all mipmaps should be created for the image. False to only allocate
+         *                               storage for the base mip-map.
+         *  @param is_mutable            true if the image should be initialized as a mutable object.
          *
-         *  May only be used for linear images.
-         *
-         *  NOTE: This information is cached at image creation time, so the driver's impl will not be
-         *        called.
-         */
-        bool get_aspect_subresource_layout(Anvil::ImageAspectFlagBits in_aspect,
-                                           uint32_t                   in_n_layer,
-                                           uint32_t                   in_n_mip,
-                                           Anvil::SubresourceLayout*  out_subresource_layout_ptr) const;
+         *  @return New image instance, if successful, or nullptr otherwise.
+         **/
+         Image(Anvil::Device*        device_ptr,
+               VkImageType           type,
+               VkFormat              format,
+               VkImageTiling         tiling,
+               VkImageUsageFlags     usage,
+               uint32_t              base_mipmap_width,
+               uint32_t              base_mipmap_height,
+               uint32_t              base_mipmap_depth,
+               uint32_t              n_layers,
+               VkSampleCountFlagBits sample_count,
+               bool                  use_full_mipmap_chain,
+               bool                  is_mutable);
 
-        const Anvil::ImageCreateInfo* get_create_info_ptr() const
+        /** Initializes a new Image instance, along with a memory backing.
+         *
+         *  This constructor assumes the image should be initialized in UNDEFINED layout. It will then
+         *  fill the storage with mipmap data (if @param mipmaps_ptr is not nullptr), and finally transition
+         *  the image to the @param image_layout layout.
+         *
+         *  @param device_ptr                        Device to use.
+         *  @param type                              Vulkan image type to use.
+         *  @param format                            Vulkan format to use.
+         *  @param tiling                            Vulkan image tiling to use.
+         *  @param usage                             Vulkan image usage pattern to use.
+         *  @param base_mipmap_width                 Width of the base mip-map.
+         *  @param base_mipmap_height                Height of the base mip-map. Must be at least 1 for all image types.
+         *  @param base_mipmap_depth                 Depth of the base mip-map. Must be at least 1 for all image types.
+         *  @param n_layers                          Number of layers to use. Must be at least 1 for all image types.
+         *  @param sample_count                      Sample count to use.
+         *  @param queue_families                    A combination of Anvil::QUEUE_FAMILY_* bits, indicating which device queues
+         *                                           the image is going to be accessed by.
+         *  @param sharing_mode                      Vulkan sharing mode to use.
+         *  @param use_full_mipmap_chain             true if all mipmaps should be created for the image. False to only allocate
+         *                                           storage for the base mip-map.
+         *  @param should_memory_backing_be_mappable true if the image should be host-vislble; false if the caller never intends to
+         *                                           map the image's memory backing into process space.
+         *  @param should_memory_backing_be_coherent true if the image's memory backing should come from a coherent memory heap.
+         *                                           false if incoherent heaps are OK. Note that it is illegal to set this argument to
+         *                                           true if @param should_memory_backing_be_mappable is false.
+         *  @param is_mutable                        true if the image should be initialized as a mutable object.
+         *  @param final_image_layout                Layout to transition the new image to. Must not be VK_IMAGE_LAYOUT_UNDEFINED or
+         *                                           VK_IMAGE_LAYOUT_PREINITIALIZED.
+         *  @param mipmaps_ptr                       If not nullptr, specified MipmapRawData items will be used to drive the mipmap contents
+         *                                           initialization process. Ignored if nullptr.
+         *
+         *  @return New image instance, if successful, or nullptr otherwise.
+         **/
+         Image(Anvil::Device*                    device_ptr,
+               VkImageType                       type,
+               VkFormat                          format,
+               VkImageTiling                     tiling,
+               VkImageUsageFlags                 usage,
+               uint32_t                          base_mipmap_width,
+               uint32_t                          base_mipmap_height,
+               uint32_t                          base_mipmap_depth,
+               uint32_t                          n_layers,
+               VkSampleCountFlagBits             sample_count,
+               Anvil::QueueFamilyBits            queue_families,
+               VkSharingMode                     sharing_mode,
+               bool                              use_full_mipmap_chain,
+               bool                              should_memory_backing_be_mappable,
+               bool                              should_memory_backing_be_coherent,
+               bool                              is_mutable,
+               VkImageLayout                     final_image_layout,
+               const std::vector<MipmapRawData>* mipmaps_ptr);
+
+         /** Wrapper constructor for existing VkImage instances. Object instantiated with
+          *  this constructor will NOT release the specified VkImage instance.
+          *
+          *  In general, you should only use this constructor for swap-chain images.
+          *
+          *  For argument discussion, see specification of the other constructors.
+          **/
+         Image(Anvil::Device*        device_ptr,
+               VkImage               image,
+               VkFormat              format,
+               VkImageTiling         tiling,
+               VkImageUsageFlags     usage,
+               uint32_t              base_mipmap_width,
+               uint32_t              base_mipmap_height,
+               uint32_t              base_mipmap_depth,
+               uint32_t              n_layers,
+               uint32_t              n_mipmaps,
+               VkSampleCountFlagBits sample_count,
+               uint32_t              n_slices,
+               bool                  is_mutable);
+
+        /** Returns the underlying VkImage instance */
+        const VkImage& get_image() const
         {
-            return m_create_info_ptr.get();
+            return m_image;
         }
-
-        /** Returns the underlying VkImage instance.
-         *
-         *  For non-sparse images, in case no memory block has been assigned to the image,
-         *  the function will issue a BUFFER_CALLBACK_ID_MEMORY_BLOCK_NEEDED call-back, so that
-         *  any memory allocator, which has this buffer scheduled for deferred memory allocation,
-         *  gets a chance to allocate & bind a memory block to the instance. A non-sparse image instance
-         *  without any memory block bound msut not be used for any GPU-side operation.
-         *
-         *  In case of sparse images, the callback will only occur if at least one memory allocation
-         *  has been scheduled for this image instance.
-         *
-         *  This behavior may optionally be disabled by setting @param in_bake_memory_if_necessary to false.
-         *  Should only be done in special circumstances.
-         *
-         */
-        const VkImage& get_image(const bool& in_bake_memory_if_necessary = true);
 
         /** Returns information about the data alignment required by the underlying VkImage instance */
-        VkDeviceSize get_image_alignment(const uint32_t& in_n_plane) const
+        VkDeviceSize get_image_alignment() const
         {
-            return m_plane_index_to_memory_properties_map.at(in_n_plane).alignment;
+            return m_image_alignment;
         }
 
-        /** Returns extent of a user-specified image mip as a VkExtent2D structure.
-         *
-         *  @param in_n_mipmap Index of the mipmap to use for the query.
-         *
-         *  @return As per summary.
-         */
-        VkExtent2D get_image_extent_2D(uint32_t in_n_mipmap) const;
+        /** Returns information about the image format used to create the underlying VkImage instance */
+        VkFormat get_image_format() const
+        {
+            return m_image_format;
+        }
 
-        /** Returns extent of a user-specified image mip as a VkExtent3D structure.
+        /** Returns the image layout this image instance was transferred to at creation time.
          *
-         *  @param in_n_mipmap Index of the mipmap to use for the query.
+         *  NOTE: This function will fail if called for an image instance, which was initialized
+         *        without a memory backing.
          *
-         *  @return As per summary.
-         */
-        VkExtent3D get_image_extent_3D(uint32_t in_n_mipmap) const;
+         *  @param out_result_ptr If function succeeds, this deref will be set to the requested value.
+         *                        Will not be touched otherwise.
+         *
+         *  @return true if the function succeeds, false otherwise.
+         **/
+        bool get_image_layout_at_creation_time(VkImageLayout* out_result_ptr) const;
 
         /** Returns information about the memory types the underlying VkImage instance supports */
-        uint32_t get_image_memory_types(const uint32_t& in_n_plane) const
+        uint32_t get_image_memory_types() const
         {
-            return m_plane_index_to_memory_properties_map.at(in_n_plane).memory_types;
+            return m_image_memory_types;
         }
 
-        /** Returns information about size of the mipmap at index @param in_n_mipmap.
+        /** Returns information about size of the mipmap at index @param n_mipmap.
          *
-         *  @param in_n_mipmap        Index of the mipmap to use for the query.
-         *  @param out_opt_width_ptr  If not nullptr, deref will be set to the width of the queried mipmap,
+         *  @param n_mipmap           Index of the mipmap to use for the query.
+         *  @param opt_out_width_ptr  If not nullptr, deref will be set to the width of the queried mipmap,
          *                            assuming the function returns ture.
-         *  @param out_opt_height_ptr If not nullptr, deref will be set to the height of the queried mipmap,
+         *  @param opt_out_height_ptr If not nullptr, deref will be set to the height of the queried mipmap,
          *                            assuming the function returns true.
-         *  @param out_opt_depth_ptr  If not nullptr, deref will be set to the depth of the queried mipmap,
+         *  @param opt_out_depth_ptr  If not nullptr, deref will be set to the depth of the queried mipmap,
          *                            assuming the function returns true.
          *
-         *  @return true if @param in_n_mipmap was a valid mipmap index; false otherwise.
+         *  @return true if @param n_mipmap was a valid mipmap index; false otherwise.
          **/
-        bool get_image_mipmap_size(uint32_t  in_n_mipmap,
-                                   uint32_t* out_opt_width_ptr,
-                                   uint32_t* out_opt_height_ptr,
-                                   uint32_t* out_opt_depth_ptr) const;
+        bool get_image_mipmap_size(uint32_t  n_mipmap,
+                                   uint32_t* opt_out_width_ptr,
+                                   uint32_t* opt_out_height_ptr,
+                                   uint32_t* opt_out_depth_ptr) const;
+
+        /** Returns information about the number of layers stored by the underlying VkImage instance */
+        uint32_t get_image_n_layers() const
+        {
+            return m_image_n_layers;
+        }
+
+        /** Returns information about the number of mipmaps stored by the underlying VkImage instance */
+        uint32_t get_image_n_mipmaps() const
+        {
+            return m_image_n_mipmaps;
+        }
+
+        /** Returns information about the number of samples stored by the underlying VkImage instance */
+        VkSampleCountFlagBits get_image_sample_count() const
+        {
+            return m_image_sample_count;
+        }
 
         /** Returns information about the amount of memory the underlying VkImage instance requires
          *  to work correctly.
          **/
-        VkDeviceSize get_image_storage_size(const uint32_t& in_n_plane) const
+        VkDeviceSize get_image_storage_size() const
         {
-            return m_plane_index_to_memory_properties_map.at(in_n_plane).storage_size;
+            return m_image_storage_size;
         }
-
-        /** Returns a pointer to the underlying memory block wrapper instance.
-         *
-         *  In case no memory block has been assigned to the non-sparse image OR some pages of
-         *  a sparse image are left without memory backing, the function will issue an
-         *  IMAGE_CALLBACK_ID_MEMORY_BLOCK_NEEDED call-back, so that any memory allocator, which
-         *  has this image scheduled for deferred memory allocation, gets a chance to allocate
-         *  & bind a memory block to the instance.
-         *
-         *  In case of sparse images, the callback will only occur if at least one memory allocation
-         *  has been scheduled for this image instance.
-         *
-         *  NOTE: The function always returns nullptr for PRTs. However, the callback takes place nevertheless.
-         *
-         *  @param in_n_plane Must be 0 for non-YUV or joint YUV images. For disjoint YUV images, the value must be between 0
-         *                    and 2 (inclusive).
-         **/
-        Anvil::MemoryBlock* get_memory_block(const uint32_t& in_n_plane = 0);
-
-        const uint32_t& get_n_mipmaps() const
-        {
-            return m_n_mipmaps;
-        }
-
-        /** Returns SFR tile size for the image.
-         *
-         *  Can only be called if the following requirements are met:
-         *
-         *  1. Parent device is a mGPU device instance.
-         *  2. Image has been initialized with the VK_IMAGE_CREATE_BIND_SFR_BIT_KHR flag.
-         *
-         *  TODO.
-         *
-         */
-        bool get_SFR_tile_size(VkExtent2D* out_result_ptr) const;
-
-        /** Returns a structure filled with details required to correctly bind tiles to a sparse image.
-         *
-         *  This function can only be called against sparse images with ALIASED or NONALIASED residency.
-         **/
-        bool get_sparse_image_aspect_properties(const Anvil::ImageAspectFlagBits           in_aspect,
-                                                const Anvil::SparseImageAspectProperties** out_result_ptr_ptr) const;
 
         /** Returns a filled subresource range descriptor, covering all layers & mipmaps of the image */
-        Anvil::ImageSubresourceRange get_subresource_range() const;
+        VkImageSubresourceRange get_subresource_range() const;
 
-        /** Tells whether this image provides data for the specified image aspects.
-         *
-         *  @param in_aspects A bitfield of image aspect bits which should be used for the query.
-         *
-         *  @return true if data for all specified aspects is provided by the image, false otherwise.
-         */
-        bool has_aspects(const Anvil::ImageAspectFlags& in_aspects) const;
-
-        /** Tells whether a physical memory page is assigned to the specified texel location.
-         *
-         *  Must only be called for sparse images whose sparse residency is not NONE.
-         *
-         *  @param in_aspect  Image aspect to use for the query.
-         *  @param in_n_layer Index of the layer to use for the query.
-         *  @param in_n_mip   Index of the mip to use for the query
-         *  @param in_x       X location of the texel.
-         *  @param in_y       Y location of the texel.
-         *  @param in_z       Z location of the texel.
-         *
-         *  @return true if physical memory is bound to the specified location, false otherwise.
-         *
-         */
-        bool is_memory_bound_for_texel(Anvil::ImageAspectFlagBits in_aspect,
-                                       uint32_t                   in_n_layer,
-                                       uint32_t                   in_n_mip,
-                                       uint32_t                   in_x,
-                                       uint32_t                   in_y,
-                                       uint32_t                   in_z) const;
-
-        bool prefers_dedicated_allocation(const uint32_t& in_n_plane) const
+        /** Tells whether the image object has been created with mutability enabled. Mutability lets you
+         *  create image views with formats that are compatible with, but not necessarily the same as, the
+         *  format used to initialize the image.
+         **/
+        bool is_image_mutable() const
         {
-            return m_plane_index_to_memory_properties_map.at(in_n_plane).prefers_dedicated_allocation;
+            return m_image_is_mutable;
         }
 
-        bool requires_dedicated_allocation(const uint32_t& in_n_plane) const
-        {
-            return m_plane_index_to_memory_properties_map.at(in_n_plane).requires_dedicated_allocation;
-        }
+        /* Each image instance maintains a field called "creation-time image layout" which determines, what layout
+         * the image has been transferred to from LAYOUT_UNDEFINED or LAYOUT_PREINITIALIZED layouts.
+         *
+         * NOTE: This function can ONLY be called for Image instances which have been created using constructors
+         *       that do not take VkImageLayout as a parameter.
+         * NOTE: This function can ONLY be called once.
+         */
+        void set_creation_time_image_layout(VkImageLayout new_image_layout);
 
-        /** Binds the specified region of a Vulkan memory object to an Image and caches information
+        /** Binds the specified region of a Vulkan memory object to the Image and caches information
          *  about the new binding.
          *
-         *  NOTE: This function can be used for both single- and multi-GPU devices. In case of the latter:
-         *        1. The image must NOT have been created for a particular swapchain instance.
-         *        2. The image must NOT be sparse.
-         *        3. If @param in_memory_block_ptr uses memory taken from a heap without VK_MEMORY_HEAP_MULTI_INSTANCE_BIT_KHR
-         *           flag, each physical device attaches to its own instance of the memory.
-         *        4. If @param in_memory_block_ptr uses memory taken from a heap WITH the flag, each physical device attaches
-         *           to memory instance 0.
+         *  The function retains the specified memory block.
          *
-         *  NOTE: If used against sparse images, the assigned memory block's size must EXACTLY match
-         *        the amount of memory required by the image. Otherwise, the function will fail.
+         *  It is currently illegal to change the memory backing, after one has been associated with
+         *  an Image instance.
          *
-         *  NOTE: If used against non-sparse images, it is illegal to change the memory backing, after
-         *        one has been associated with an Image instance.
-         *
-         *  @param in_memory_block_ptr Memory block to assign to the image
-         *
-         *  @return true if successful, false otherwise.
+         *  @param memory       Memory object to use for the backing.
+         *  @param size         Size of the memory region to use.
+         *  @param start_offset Start offset of the memory region to use. 
          **/
-        bool set_memory(MemoryBlockUniquePtr in_memory_block_ptr);
-        bool set_memory(Anvil::MemoryBlock*  in_memory_block_ptr);
+        void set_memory(Anvil::MemoryBlock* memory_block_ptr);
 
-        /** Binds the image to instances of memory for physical devices specified by the caller.
-         *
-         *  NOTE: This function must NOT be used for sparse images.
-         *  NOTE: This function must NOT be used for images created for a single-GPU device.
-         *  NOTE: This function can only be used for images, whose memory comes off a heap with the
-         *        VK_MEMORY_HEAP_MULTI_INSTANCE_BIT_KHR flag.
-         *  NOTE: It is illegal to change the memory backing, after one has been associated with an Image instance.
-         *
-         *  TODO
-         **/
-        bool set_memory(MemoryBlockUniquePtr    in_memory_block_ptr,
-                        uint32_t                in_n_device_group_indices,
-                        const uint32_t*         in_device_group_indices_ptr);
-        bool set_memory(Anvil::MemoryBlock*     in_memory_block_ptr,
-                        uint32_t                in_n_device_group_indices,
-                        const uint32_t*         in_device_group_indices_ptr);
-
-        /** Binds the image to instances of memory, according to SFR rectangles specified by the caller.
-         *  For more information, please read VK_KHR_device_group extension specification.
-         *
-         *  NOTE: This function must NOT be used for sparse images.
-         *  NOTE: This function must NOT be used for images created for a single-GPU device.
-         *  NOTE: It is illegal to change the memory backing, after one has been associated with an Image instance.
-         *
-         *  TODO
-         **/
-        bool set_memory(MemoryBlockUniquePtr in_memory_block_ptr,
-                        uint32_t             in_n_SFR_rects,
-                        const VkRect2D*      in_SFRs_ptr);
-        bool set_memory(Anvil::MemoryBlock*  in_memory_block_ptr,
-                        uint32_t             in_n_SFR_rects,
-                        const VkRect2D*      in_SFRs_ptr);
-
-        /** Updates image with specified mip-map data. Blocks until the operation finishes executing.
-         *
-         *  Handles both linear and optimal images.
-         *
-         *  @param in_mipmaps_ptr           A vector of MipmapRawData items, holding mipmap data. Must not
-         *                                  be NULL.
-         *  @param in_current_image_layout  Image layout, that the image is in right now.
-         *  @param out_new_image_layout_ptr Deref will be set to the image layout the image has been transitioned
-         *                                  to, in order to perform the request. Must not be NULL.
-         *
-         **/
-        void upload_mipmaps(const std::vector<MipmapRawData>* in_mipmaps_ptr,
-                            Anvil::ImageLayout                in_current_image_layout,
-                            Anvil::ImageLayout*               out_new_image_layout_ptr);
+        /** Returns an access mask which has all the access bits, relevant to the user-specified image layout,
+         *  enabled. */
+        static VkAccessFlags get_access_mask_from_image_layout(VkImageLayout layout);
 
     private:
-        /** Defines dimensions of a single image mip-map */
-        typedef struct Mipmap
-        {
-            uint32_t depth;
-            uint32_t height;
-            uint32_t width;
-
-            Mipmap(uint32_t in_width,
-                   uint32_t in_height,
-                   uint32_t in_depth)
-            {
-                depth  = in_depth;
-                height = in_height;
-                width  = in_width;
-            }
-        } Mipmap;
-
-        typedef std::vector<Mipmap> Mipmaps;
-
-        /** Holds information on page occupancy for a single layer-mip for a specific image aspect */
-        typedef struct AspectPageOccupancyLayerMipData
-        {
-            /* Each item in this vector holds a reference to a MemoryBlock instance, which provides memory
-            *  backing for the corresponding linearized image tile location */
-            std::vector<Anvil::MemoryBlock*> tile_to_block_mappings;
-
-            uint32_t n_tiles_x;
-            uint32_t n_tiles_y;
-            uint32_t n_tiles_z;
-            uint32_t tile_depth;
-            uint32_t tile_height;
-            uint32_t tile_width;
-
-            /** Converts user-specified XYZ location to a linearized index.
-             *
-             *  @param in_x X location of the texel.
-             *  @param in_y Y location of the texel.
-             *  @param in_z Z location of the texel.
-             *
-             *  @return As per description.
-             */
-            uint32_t get_texture_space_xyz_to_block_mapping_index(uint32_t in_x,
-                                                                  uint32_t in_y,
-                                                                  uint32_t in_z) const
-            {
-                const uint32_t tile_x = in_x / tile_width;
-                const uint32_t tile_y = in_y / tile_height;
-                const uint32_t tile_z = in_z / tile_depth;
-
-                const uint32_t result = tile_z * n_tiles_x * n_tiles_y
-                                      + tile_y * n_tiles_x
-                                      + tile_x;
-
-                anvil_assert(result < tile_to_block_mappings.size() );
-
-                return result;
-            }
-
-            /** Converts a tile location, expressed in XYZ space, to a linearized index.
-             *
-             *  @param in_tile_x X index of the tile.
-             *  @param in_tile_y Y index of the tile.
-             *  @param in_tile_z Z index of the tile.
-             *
-             *  @return As per description.
-             */
-            uint32_t get_tile_space_xyz_to_block_mapping_index(uint32_t in_tile_x,
-                                                               uint32_t in_tile_y,
-                                                               uint32_t in_tile_z) const
-            {
-                const uint32_t result = in_tile_z * n_tiles_x * n_tiles_y
-                                      + in_tile_y * n_tiles_x
-                                      + in_tile_x;
-
-                anvil_assert(result < tile_to_block_mappings.size() );
-
-                return result;
-            }
-
-            /** Constructor. Fills the structure and preallocates memory.
-             *
-             *  @param in_mip_width   Width of the mip to represent.
-             *  @param in_mip_height  Height of the mip.
-             *  @param in_mip_depth   Depth of the mip.
-             *  @param in_tile_width  Width of the mip's tile.
-             *  @param in_tile_height Height of the mip's tile.
-             *  @param in_tile_depth  Depth of the mip's tile.
-             **/
-            AspectPageOccupancyLayerMipData(uint32_t in_mip_width,
-                                            uint32_t in_mip_height,
-                                            uint32_t in_mip_depth,
-                                            uint32_t in_tile_width,
-                                            uint32_t in_tile_height,
-                                            uint32_t in_tile_depth)
-            {
-                tile_depth  = in_tile_depth;
-                tile_height = in_tile_height;
-                tile_width  = in_tile_width;
-                n_tiles_x   = Anvil::Utils::round_up(in_mip_width,  tile_width)  / tile_width;
-                n_tiles_y   = Anvil::Utils::round_up(in_mip_height, tile_height) / tile_height;
-                n_tiles_z   = Anvil::Utils::round_up(in_mip_depth,  tile_depth)  / tile_depth;
-
-                anvil_assert(n_tiles_x >= 1 && n_tiles_y >= 1 && n_tiles_z >= 1);
-
-                const uint32_t n_total_tiles = n_tiles_x * n_tiles_y * n_tiles_z;
-
-                tile_to_block_mappings.resize(n_total_tiles);
-            }
-        } AspectPageOccupancyLayerMipData;
-
-        /** Holds page occupancy data for a single layer */
-        typedef struct AspectPageOccupancyLayerData
-        {
-            std::vector<AspectPageOccupancyLayerMipData> mips;
-
-            uint32_t                                n_total_tail_pages;
-            std::map<Anvil::MemoryBlock*, uint32_t> tail_pages_per_binding;
-            std::vector<PageOccupancyStatus>        tail_occupancy;
-
-            AspectPageOccupancyLayerData()
-            {
-                n_total_tail_pages = 0;
-            }
-        } AspectPageOccupancyLayerData;
-
-        /** Holds page occupancy data for all layers */
-        typedef struct AspectPageOccupancyData
-        {
-            std::vector<AspectPageOccupancyLayerData> layers;
-
-            AspectPageOccupancyData()
-            {
-                /* Stub */
-            }
-        } AspectPageOccupancyData;
+        /* Private type declarations */
+        typedef std::vector<Mipmap>     Mipmaps;
 
         /* Private functions */
+        Image           (const Image&);
+        Image& operator=(const Image&);
 
-        Image(Anvil::ImageCreateInfoUniquePtr in_create_info_ptr);
+        virtual ~Image();
 
-        bool do_sanity_checks_for_physical_device_binding(const Anvil::MemoryBlock* in_memory_block_ptr,
-                                                          uint32_t                  in_n_physical_devices) const;
-        bool do_sanity_checks_for_sfr_binding            (uint32_t                  in_n_SFR_rects,
-                                                          const VkRect2D*           in_SFRs_ptr) const;
-
-        bool init               ();
-        void init_mipmap_props  ();
-        void init_page_occupancy(const std::vector<Anvil::SparseImageMemoryRequirements>& in_memory_reqs);
-        void init_sfr_tile_size ();
-
-        bool set_memory_internal          (Anvil::MemoryBlock*    in_memory_block_ptr,
-                                           bool                   in_owned_by_image,
-                                           uint32_t               in_n_device_group_indices,
-                                           const uint32_t*        in_device_group_indices_ptr,
-                                           uint32_t               in_n_SFR_rects,
-                                           const VkRect2D*        in_SFRs_ptr);
-        bool set_swapchain_memory_internal(uint32_t               in_swapchain_image_index,
-                                           uint32_t               in_opt_n_SFR_rects,
-                                           const VkRect2D*        in_opt_SFRs_ptr,
-                                           uint32_t               in_opt_n_device_indices,
-                                           const uint32_t*        in_opt_device_indices);
-
-
-        void on_memory_backing_update       (const Anvil::ImageSubresource& in_subresource,
-                                             VkOffset3D                     in_offset,
-                                             VkExtent3D                     in_extent,
-                                             Anvil::MemoryBlock*            in_memory_block_ptr,
-                                             VkDeviceSize                   in_memory_block_start_offset,
-                                             bool                           in_memory_block_owned_by_image);
-        void on_memory_backing_opaque_update(uint32_t                       in_n_plane,
-                                             VkDeviceSize                   in_resource_offset,
-                                             VkDeviceSize                   in_size,
-                                             Anvil::MemoryBlock*            in_memory_block_ptr,
-                                             VkDeviceSize                   in_memory_block_start_offset,
-                                             bool                           in_memory_block_owned_by_image);
-
-        void transition_to_post_alloc_image_layout(Anvil::AccessFlags in_src_access_mask,
-                                                   Anvil::ImageLayout in_src_layout);
+        void init             (VkImageType                       type,
+                               VkFormat                          format,
+                               VkImageTiling                     tiling,
+                               VkImageUsageFlags                 usage,
+                               uint32_t                          base_mipmap_width,
+                               uint32_t                          base_mipmap_height,
+                               uint32_t                          base_mipmap_depth,
+                               uint32_t                          n_layers,
+                               VkSampleCountFlagBits             sample_count,
+                               Anvil::QueueFamilyBits            queue_families,
+                               VkSharingMode                     sharing_mode,
+                               bool                              use_full_mipmap_chain,
+                               bool                              memory_mappable,
+                               bool                              memory_coherent,
+                               const VkImageLayout*              start_image_layout_ptr,
+                               const VkImageLayout*              final_image_layout_ptr,
+                               const std::vector<MipmapRawData>* mipmaps_ptr);
+        void init_mipmap_props();
+        void upload_mipmaps   (const std::vector<Anvil::MipmapRawData>& mipmaps,
+                               VkImageLayout*                           out_new_image_layout_ptr);
 
         /* Private members */
-        typedef std::pair<uint32_t /* n_layer */, uint32_t /* n_mip */>              LayerMipKey;
-        typedef std::map<LayerMipKey, Anvil::SubresourceLayout>                      LayerMipToSubresourceLayoutMap;
-        typedef std::map<Anvil::ImageAspectFlagBits, LayerMipToSubresourceLayoutMap> AspectToLayerMipToSubresourceLayoutMap;
+        Anvil::Device*        m_device_ptr;
+        VkImage               m_image;
+        VkDeviceSize          m_image_alignment;
+        uint32_t              m_image_depth;
+        VkFormat              m_image_format;
+        uint32_t              m_image_height;
+        bool                  m_image_is_mutable;
+        VkImageLayout         m_image_layout_at_creation;
+        uint32_t              m_image_memory_types;
+        Mipmaps               m_image_mipmaps;
+        uint32_t              m_image_n_layers;
+        uint32_t              m_image_n_mipmaps;
+        uint32_t              m_image_n_slices;
+        bool                  m_image_owner;
+        VkSampleCountFlagBits m_image_sample_count;
+        VkDeviceSize          m_image_storage_size;
+        VkImageTiling         m_image_tiling;
+        VkImageUsageFlagBits  m_image_usage;
+        uint32_t              m_image_width;
 
-        /* NOTE: For YUV images, this map uses .._PLANE_x_..       aspects as keys. Non-disjoint YUV images only use PLANE_0 key.
-         *       For all others, this map uses COLOR/DEPTH/STENCIL aspect keys.
-         *
-         * NOTE: This field is only used for linear images.
-         */
-        AspectToLayerMipToSubresourceLayoutMap m_linear_image_aspect_data;
+        Anvil::MemoryBlock* m_memory_block_ptr;
+        bool                m_memory_owner;
+    };
 
-        Anvil::ImageCreateInfoUniquePtr        m_create_info_ptr;
-        bool                                   m_has_transitioned_to_post_alloc_layout;
-        VkImage                                m_image;
-        Mipmaps                                m_mipmap_props;
-        uint32_t                               m_n_mipmaps;
-        bool                                   m_swapchain_memory_assigned;
-
-        struct PerPlaneMemoryProperties
+    /** Delete functor. Useful if you need to wrap the image instance in an auto pointer */
+    struct ImageDeleter
+    {
+        void operator()(Image* image_ptr) const
         {
-            VkDeviceSize                        alignment;
-            uint32_t                            memory_types;
-            std::unique_ptr<Anvil::PageTracker> page_tracker_ptr; /* only used for sparse binding images */
-            bool                                prefers_dedicated_allocation;
-            bool                                requires_dedicated_allocation;
-            VkDeviceSize                        storage_size;
-
-            PerPlaneMemoryProperties()
-                :alignment                    (UINT64_MAX),
-                 memory_types                 (0),
-                 prefers_dedicated_allocation (false),
-                 requires_dedicated_allocation(false),
-                 storage_size                 (0)
-            {
-                /* Stub */
-            }
-
-            PerPlaneMemoryProperties(const VkDeviceSize& in_alignment,
-                                     const uint32_t&     in_memory_types,
-                                     const bool&         in_prefers_dedicated_allocation,
-                                     const bool&         in_requires_dedicated_allocation,
-                                     const VkDeviceSize& in_storage_size)
-                :alignment                    (in_alignment),
-                 memory_types                 (in_memory_types),
-                 prefers_dedicated_allocation (in_prefers_dedicated_allocation),
-                 requires_dedicated_allocation(in_requires_dedicated_allocation),
-                 storage_size                 (in_storage_size)
-            {
-                /* Stub */
-            }
-
-            ANVIL_DISABLE_ASSIGNMENT_OPERATOR(PerPlaneMemoryProperties);
-        };
-
-        /* NOTE: This map always holds exactly one item (key: 0) for single-planar (ie.non-YUV) and joint YUV images. */
-        std::unordered_map<uint32_t, PerPlaneMemoryProperties> m_plane_index_to_memory_properties_map;
-
-        std::vector<uint32_t> m_peer_device_indices;
-        std::vector<VkRect2D> m_peer_sfr_rects;
-        VkExtent2D            m_sfr_tile_size;
-
-        MemoryBlockUniquePtr              m_metadata_memory_block_ptr;
-        std::vector<MemoryBlockUniquePtr> m_memory_blocks_owned;
-
-        std::map<Anvil::ImageAspectFlagBits, AspectPageOccupancyData*>           m_sparse_aspect_page_occupancy;
-        std::vector<std::unique_ptr<AspectPageOccupancyData> >                   m_sparse_aspect_page_occupancy_data_items_owned;
-        std::map<Anvil::ImageAspectFlagBits, Anvil::SparseImageAspectProperties> m_sparse_aspect_props;
-
-        friend class Anvil::Queue;
-
-        ANVIL_DISABLE_ASSIGNMENT_OPERATOR(Image);
-        ANVIL_DISABLE_COPY_CONSTRUCTOR(Image);
+            image_ptr->release();
+        }
     };
 }; /* Vulkan namespace */
 

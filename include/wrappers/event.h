@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2017-2018 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2016 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -31,35 +31,24 @@
 #ifndef WRAPPERS_EVENT_H
 #define WRAPPERS_EVENT_H
 
-#include "misc/debug_marker.h"
-#include "misc/mt_safety.h"
+#include "misc/ref_counter.h"
 #include "misc/types.h"
 
 namespace Anvil
 {
     /** Wrapper class for Vulkan events */
-    class Event : public DebugMarkerSupportProvider<Event>,
-                  public MTSafetySupportProvider
+    class Event : public RefCounterSupportProvider
     {
     public:
         /* Public functions */
 
-        /** Creates a new Event instance.
+        /** Constructor.
          *
          *  Creates a single Vulkan event instance and registers the object in Object Tracker.
-         */
-        static Anvil::EventUniquePtr create(Anvil::EventCreateInfoUniquePtr in_create_info_ptr);
-
-        /** Destructor.
          *
-         *  Releases the Vulkan counterpart and unregisters the wrapper instance from the object tracker.
-         **/
-        virtual ~Event();
-
-        const Anvil::EventCreateInfo* get_create_info_ptr() const
-        {
-            return m_create_info_ptr.get();
-        }
+         *  @param device_ptr Device to use.
+         */
+        Event(Anvil::Device* device_ptr);
 
         /** Retrieves a raw Vulkan handle for the underlying VkEvent instance. */
         VkEvent get_event() const
@@ -92,19 +81,25 @@ namespace Anvil
 
     private:
         /* Private functions */
-
-        /* Constructor. */
-        Event(Anvil::EventCreateInfoUniquePtr in_create_info_ptr);
-
         Event           (const Event&);
         Event& operator=(const Event&);
 
-        bool init         ();
+        virtual ~Event();
+
         void release_event();
 
         /* Private variables */
-        Anvil::EventCreateInfoUniquePtr m_create_info_ptr;
-        VkEvent                         m_event;
+        Anvil::Device* m_device_ptr;
+        VkEvent        m_event;
+    };
+
+    /** Delete functor. Useful if you need to wrap the event instance in an auto pointer */
+    struct EventDeleter
+    {
+        void operator()(Event* event_ptr) const
+        {
+            event_ptr->release();
+        }
     };
 }; /* namespace Anvil */
 

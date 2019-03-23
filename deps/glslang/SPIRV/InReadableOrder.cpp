@@ -1,11 +1,11 @@
 //
-// Copyright (C) 2016 Google, Inc.
+//Copyright (C) 2016 Google, Inc.
 //
-// All rights reserved.
+//All rights reserved.
 //
-// Redistribution and use in source and binary forms, with or without
-// modification, are permitted provided that the following conditions
-// are met:
+//Redistribution and use in source and binary forms, with or without
+//modification, are permitted provided that the following conditions
+//are met:
 //
 //    Redistributions of source code must retain the above copyright
 //    notice, this list of conditions and the following disclaimer.
@@ -19,18 +19,18 @@
 //    contributors may be used to endorse or promote products derived
 //    from this software without specific prior written permission.
 //
-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
-// FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
-// COPYRIGHT HOLDERS OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
-// INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
-// BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
-// LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
-// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
-// LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
-// ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-// POSSIBILITY OF SUCH DAMAGE.
+//THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+//"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+//LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+//FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+//COPYRIGHT HOLDERS OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+//INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+//BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+//LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+//CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+//LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+//ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+//POSSIBILITY OF SUCH DAMAGE.
 
 // The SPIR-V spec requires code blocks to appear in an order satisfying the
 // dominator-tree direction (ie, dominator before the dominated).  This is,
@@ -51,7 +51,7 @@
 #include "spvIR.h"
 
 #include <cassert>
-#include <unordered_set>
+#include <unordered_map>
 
 using spv::Block;
 using spv::Id;
@@ -69,33 +69,33 @@ public:
     void visit(Block* block)
     {
         assert(block);
-        if (visited_.count(block) || delayed_.count(block))
+        if (visited_[block] || delayed_[block])
             return;
         callback_(block);
-        visited_.insert(block);
+        visited_[block] = true;
         Block* mergeBlock = nullptr;
         Block* continueBlock = nullptr;
         auto mergeInst = block->getMergeInstruction();
         if (mergeInst) {
             Id mergeId = mergeInst->getIdOperand(0);
             mergeBlock = block->getParent().getParent().getInstruction(mergeId)->getBlock();
-            delayed_.insert(mergeBlock);
+            delayed_[mergeBlock] = true;
             if (mergeInst->getOpCode() == spv::OpLoopMerge) {
                 Id continueId = mergeInst->getIdOperand(1);
                 continueBlock =
                     block->getParent().getParent().getInstruction(continueId)->getBlock();
-                delayed_.insert(continueBlock);
+                delayed_[continueBlock] = true;
             }
         }
         const auto successors = block->getSuccessors();
         for (auto it = successors.cbegin(); it != successors.cend(); ++it)
             visit(*it);
         if (continueBlock) {
-            delayed_.erase(continueBlock);
+            delayed_[continueBlock] = false;
             visit(continueBlock);
         }
         if (mergeBlock) {
-            delayed_.erase(mergeBlock);
+            delayed_[mergeBlock] = false;
             visit(mergeBlock);
         }
     }
@@ -103,7 +103,7 @@ public:
 private:
     std::function<void(Block*)> callback_;
     // Whether a block has already been visited or is being delayed.
-    std::unordered_set<Block *> visited_, delayed_;
+    std::unordered_map<Block *, bool> visited_, delayed_;
 };
 }
 

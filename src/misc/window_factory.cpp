@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2017-2018 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2016 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,139 +22,57 @@
 
 #include "misc/window_factory.h"
 
-Anvil::WindowUniquePtr Anvil::WindowFactory::create_window(WindowPlatform          in_platform,
-                                                           const std::string&      in_title,
-                                                           unsigned int            in_width,
-                                                           unsigned int            in_height,
-                                                           bool                    in_closable,
-                                                           PresentCallbackFunction in_present_callback_func,
-                                                           bool                    in_visible)
+Anvil::Window* Anvil::WindowFactory::create_window(WindowPlatform         platform,
+                                                   const std::string&     title,
+                                                   unsigned int           width,
+                                                   unsigned int           height,
+                                                   PFNPRESENTCALLBACKPROC present_callback_func_ptr,
+                                                   void*                  present_callback_func_user_arg,
+                                                   bool                   is_dummy)
 {
-    WindowUniquePtr result_ptr(nullptr,
-                               std::default_delete<Window>() );
-
-    switch (in_platform)
+    if (is_dummy)
     {
-        case WINDOW_PLATFORM_DUMMY:
-        {
-            result_ptr = Anvil::DummyWindow::create(in_title,
-                                                    in_width,
-                                                    in_height,
-                                                    in_present_callback_func);
-
-            break;
-        }
-
-        case WINDOW_PLATFORM_DUMMY_WITH_PNG_SNAPSHOTS:
-        {
-            result_ptr = Anvil::DummyWindowWithPNGSnapshots::create(in_title,
-                                                                    in_width,
-                                                                    in_height,
-                                                                    in_present_callback_func);
-
-            break;
-        }
-
-#ifdef _WIN32
-
-        #if defined(ANVIL_INCLUDE_WIN3264_WINDOW_SYSTEM_SUPPORT)
-            case WINDOW_PLATFORM_SYSTEM:
-            {
-                result_ptr = Anvil::WindowWin3264::create(in_title,
-                                                          in_width,
-                                                          in_height,
-                                                          in_closable,
-                                                          in_present_callback_func,
-                                                          in_visible);
-
-                break;
-            }
-        #endif
-#else
-        #if defined(ANVIL_INCLUDE_XCB_WINDOW_SYSTEM_SUPPORT)
-            case WINDOW_PLATFORM_XCB:
-            {
-                result_ptr = Anvil::WindowXcb::create(in_title,
-                                                      in_width,
-                                                      in_height,
-                                                      in_closable,
-                                                      in_present_callback_func,
-                                                      in_visible);
-
-                break;
-            }
-        #endif
-
-        case WINDOW_PLATFORM_XLIB:
-        case WINDOW_PLATFORM_WAYLAND:
-            /* Fall-back - TODO */
-
-#endif /* !_WIN32 */
-
-        default:
-        {
-            /* TODO */
-            anvil_assert_fail();
-        }
+        return new Anvil::DummyWindow(title,
+                                      width,
+                                      height,
+                                      present_callback_func_ptr,
+                                      present_callback_func_user_arg);
     }
-
-    return result_ptr;
-}
-
-Anvil::WindowUniquePtr Anvil::WindowFactory::create_window(WindowPlatform in_platform,
-                                                           WindowHandle   in_handle,
-                                                           void*          in_xcb_connection_ptr)
-{
-    WindowUniquePtr result_ptr(nullptr,
-                               std::default_delete<Window>() );
-
-    /* NOTE: These arguments may not be used at all, depending on ANVIL_INCLUDE_*_WINDOW_SYSTEM_SUPPORT configuration */
-    ANVIL_REDUNDANT_ARGUMENT(in_handle);
-    ANVIL_REDUNDANT_ARGUMENT(in_xcb_connection_ptr);
-
+    else
     #ifdef _WIN32
     {
-        ANVIL_REDUNDANT_ARGUMENT(in_xcb_connection_ptr);
+        anvil_assert(WINDOW_PLATFORM_SYSTEM == platform);
+
+        return new Anvil::WindowWin3264(title,
+                                        width,
+                                        height,
+                                        present_callback_func_ptr,
+                                        present_callback_func_user_arg);
     }
-    #endif
-
-    switch (in_platform)
+    #else
     {
-#ifdef _WIN32
-
-        #if defined(ANVIL_INCLUDE_WIN3264_WINDOW_SYSTEM_SUPPORT)
-            case WINDOW_PLATFORM_SYSTEM:
-            {
-                result_ptr = Anvil::WindowWin3264::create(in_handle);
-
-                break;
-            }
-        #endif
-
-#else
-        #if defined(ANVIL_INCLUDE_XCB_WINDOW_SYSTEM_SUPPORT)
+        switch (platform)
+        {
             case WINDOW_PLATFORM_XCB:
             {
-                result_ptr = Anvil::WindowXcb::create(static_cast<xcb_connection_t*>(in_xcb_connection_ptr),
-                                                      in_handle);
+                return new Anvil::WindowXcb(title,
+                                            width,
+                                            height,
+                                            present_callback_func_ptr,
+                                            present_callback_func_user_arg);
 
                 break;
             }
-        #endif
 
-        case WINDOW_PLATFORM_XLIB:
-        case WINDOW_PLATFORM_WAYLAND:
-            /* Fall-back - TODO */
-
-#endif /* !_WIN32 */
-
-        case WINDOW_PLATFORM_DUMMY:
-        case WINDOW_PLATFORM_DUMMY_WITH_PNG_SNAPSHOTS:
-        default:
-        {
-            anvil_assert_fail();
+            case WINDOW_PLATFORM_XLIB:
+            case WINDOW_PLATFORM_WAYLAND:
+            default:
+            {
+                anvil_assert(0);
+            }
         }
-    }
 
-    return result_ptr;
+        return nullptr;
+    }
+    #endif /* _WIN32 */
 }

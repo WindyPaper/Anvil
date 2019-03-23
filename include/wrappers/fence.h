@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2017-2018 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2016 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -31,47 +31,27 @@
 #ifndef WRAPPERS_FENCE_H
 #define WRAPPERS_FENCE_H
 
-#include "misc/debug_marker.h"
-#include "misc/mt_safety.h"
+#include "misc/ref_counter.h"
 #include "misc/types.h"
 
 namespace Anvil
 {
     /* Wrapper class for Vulkan fences */
-    class Fence : public DebugMarkerSupportProvider<Fence>,
-                  public MTSafetySupportProvider
+    class Fence : public RefCounterSupportProvider
     {
     public:
         /* Public functions */
 
-        /** Destructor.
-         *
-         *  Destroys the Vulkan counterpart and unregister the wrapper instance from the object tracker.
-         **/
-        virtual ~Fence();
-
-        /** Creates a new Fence instance.
+        /** Constructor.
          *
          *  Creates a single Vulkan fence instance and registers the object in Object Tracker.
+         *
+         *  @param device_ptr       Device to use.
+         *  @param create_signalled true if the fence should be created as a signalled entity.
+         *                          False to make it unsignalled at creation time.
          */
-        static Anvil::FenceUniquePtr create(Anvil::FenceCreateInfoUniquePtr in_create_info_ptr);
-
-        /* Creates a new external fence handle of the user-specified type.
-         *
-         * For NT handle types, the function can only be called once per each NT handle type. Subsequent
-         * calls will result in the function triggering an assertion failure and returning null.
-         *
-         * Returns nullptr if unsuccessful.
-         *
-         * Requires VK_KHR_external_fence_fd    under Linux.
-         * Requires VK_KHR_external_fence_win32 under Windows.
-         */
-        ExternalHandleUniquePtr export_to_external_handle(const Anvil::ExternalFenceHandleTypeFlagBits& in_fence_handle_type);
-
-        const Anvil::FenceCreateInfo* get_create_info_ptr() const
-        {
-            return m_create_info_ptr.get();
-        }
+        Fence(Anvil::Device* device_ptr,
+              bool           create_signalled);
 
         /** Retrieves a raw handle to the underlying Vulkan fence instance */
         VkFence get_fence() const
@@ -80,37 +60,12 @@ namespace Anvil
         }
 
         /** Retrieves a pointer to the raw handle to the underlying Vulkan fence instance */
-        const VkFence* get_fence_ptr() const
+        const VkFence* get_fence_ptr()
         {
+            m_possibly_set = true;
+
             return &m_fence;
         }
-
-        /* TODO
-         *
-         * Requires VK_KHR_external_fence_fd    under Linux.
-         * Requires VK_KHR_external_fence_win32 under Windows.
-         *
-         * NOTE: Under Linux, @param in_handle is no longer valid if function returns true.
-         *
-         * @return true if successful, false otherwise.
-         *
-         * @param in_temporary_import True if a temporary import operation should be performed. False if
-         *                            a permanent import is being requested.
-         * @param in_handle_type      Type of the handle that is being imported.
-         * @param in_handle           (Linux):   Handle to use.
-         * @param in_opt_handle       (Windows): Handle to use. Must not be null if @param in_opt_name is null and vice versa.
-         * @param in_opt_name         (Windows): Name of the handle to use. Must not be null if @param in_opt_handle is null and vice versa.
-         */
-        #if defined(_WIN32)
-            bool import_from_external_handle(const bool&                                   in_temporary_import,
-                                             const Anvil::ExternalFenceHandleTypeFlagBits& in_handle_type,
-                                             const ExternalHandleType&                     in_opt_handle,
-                                             const std::wstring&                           in_opt_name);
-        #else
-            bool import_from_external_handle(const bool&                                   in_temporary_import,
-                                             const Anvil::ExternalFenceHandleTypeFlagBits& in_handle_type,
-                                             const ExternalHandleType&                     in_handle);
-        #endif
 
         /** Tells whether the fence is signalled at the time of the call.
          *
@@ -126,37 +81,40 @@ namespace Anvil
 
         /** Resets the specified number of Vulkan fences.
          *
-         *  This function is expected to be more efficient than calling reset() for @param in_n_fences
-         *  times, assuming @param in_n_fences is larger than 1.
+         *  This function is expected to be more efficient than calling reset() for @param n_fences
+         *  times, assuming @param n_fences is larger than 1.
          *
-         *  @param in_n_fences Number of Fence instances accessible under @param in_fences.
-         *  @param in_fences   An array of @param in_n_fences Fence instances to reset. Must not be nullptr,
-         *                     unless @param in_n_fences is 0.
+         *  @param n_fences Number of Fence instances accessible under @param fences.
+         *  @param fences   An array of @param n_fences Fence instances to reset. Must not be nullptr,
+         *                  unless @param n_fences is 0.
          *
          *  @return true if the function executed successfully, false otherwise.
          **/
-        static bool reset_fences(const uint32_t in_n_fences,
-                                 Fence*         in_fences);
+        static bool reset_fences(const uint32_t n_fences,
+                                 Fence*         fences);
 
     private:
         /* Private functions */
-
-        /** Constructor.
-         *
-         *  Please see documentation of create() for specification
-         */
-        Fence(Anvil::FenceCreateInfoUniquePtr in_create_info_ptr);
-
         Fence           (const Fence&);
         Fence& operator=(const Fence&);
 
-        bool init         ();
+        virtual ~Fence();
+
         void release_fence();
 
         /* Private variables */
-        Anvil::FenceCreateInfoUniquePtr                        m_create_info_ptr;
-        std::map<Anvil::ExternalFenceHandleTypeFlagBits, bool> m_external_fence_created_for_handle_type;
-        VkFence                                                m_fence;
+        Anvil::Device* m_device_ptr;
+        VkFence        m_fence;
+        bool           m_possibly_set;
+    };
+
+    /* Delete functor. Useful for wrapping Fence instances in auto pointers. */
+    struct FenceDeleter
+    {
+        void operator()(Fence* fence_ptr)
+        {
+            fence_ptr->release();
+        }
     };
 }; /* namespace Anvil */
 

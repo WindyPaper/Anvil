@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2017-2018 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2016 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -32,8 +32,7 @@
 #ifndef WRAPPERS_SWAPCHAIN_H
 #define WRAPPERS_SWAPCHAIN_H
 
-#include "misc/debug_marker.h"
-#include "misc/mt_safety.h"
+#include "misc/ref_counter.h"
 #include "misc/types.h"
 #include "wrappers/device.h"
 #include "wrappers/fence.h"
@@ -44,92 +43,107 @@
 namespace Anvil
 {
     /* Wrapper class for a Vulkan Swapchain */
-    class Swapchain : public DebugMarkerSupportProvider<Swapchain>,
-                      public MTSafetySupportProvider
+    class Swapchain : public RefCounterSupportProvider
     {
     public:
         /* Public functions */
 
-        static Anvil::SwapchainUniquePtr create(Anvil::SwapchainCreateInfoUniquePtr in_create_info_ptr);
+        /** Constructor.
+         *
+         *  @param device_ptr                    Device to initialize the swapchain for.
+         *  @param parent_surface_ptr            Rendering surface the swapchain is to be created for. Must
+         *                                       not be nullptr.
+         *  @param window_ptr                    current window to create the swapchain for. Must not be nullptr.
+         *  @param format                        Format to use for the swapchain image.
+         *  @param present_mode                  Presentation mode to use for the swapchain.
+         *  @param usage_flags                   Image usage flags to use for the swapchain.
+         *  @param n_images                      Number of swapchain images to use for the swapchain.
+         *  @param pfn_acquire_next_image_proc   Func pointer to device-specific vkAcquireNextImageKHR() implementation.
+         *                                       Must not be nullptr.
+         *  @param pfn_create_swapchain_proc     Func pointer to device-specific vkCreateSwapchainKHR() implementation.
+         *                                       Must not be nullptr.
+         *  @param pfn_destroy_swapchain_proc    Func pointer to device-specific vkDestroySwapchainKHR() implementation.
+         *                                       Must not be nullptr.
+         *  @param pfn_get_swapchain_images_proc Func pointer to device-specific vkGetSwapchainImages() implementation.
+         *                                       Must not be nullptr.
+         *
+         */
+        Swapchain(Anvil::Device*              device_ptr,
+                  Anvil::RenderingSurface*    parent_surface_ptr,
+                  Anvil::Window*              window_ptr,
+                  VkFormat                    format,
+                  VkPresentModeKHR            present_mode,
+                  VkImageUsageFlags           usage_flags,
+                  uint32_t                    n_images,
+                  PFN_vkAcquireNextImageKHR   pfn_acquire_next_image_proc,
+                  PFN_vkCreateSwapchainKHR    pfn_create_swapchain_proc,
+                  PFN_vkDestroySwapchainKHR   pfn_destroy_swapchain_proc,
+                  PFN_vkGetSwapchainImagesKHR pfn_get_swapchain_images_proc);
 
-        /** Destructor.
+        /** Acquires a new swapchain image and waits until it becomes available before returning
+         *  control to the caller.
          *
-         *  Destroys the Vulkan counterpart and unregisters the wrapper instance from the Object Tracker.
-         **/
-        virtual ~Swapchain();
+         *  @return Index of the swapchain image that has been acquired.
+         */
+        uint32_t acquire_image_by_blocking();
 
-        /** Acquires a new swapchain image.
+        /** Acquires a new swapchain image. Does NOT block until the image becomes available, but instead
+         *  sets the specified semaphore.
          *
-         *  Can be used for both SGPUDevice and mGPU swapchains.
-         *
-         *  @param in_semaphore_ptr Semaphore to set upon frame acquisition. May be nullptr (assuming the implications are understood!)
-         *  @param in_should_block  Set to true, if you want to wait on a fence set by vkAcquireNextImage*KHR() functions
-         *                          which are called by this function. The wrapper instantiates a unique fence for each allotted swapchain
-         *                          image, in order to defer the CPU-side wait in time.
-         *                          MUST be true if you need a CPU/GPU sync point (examples include doing CPU writes to memory which is going
-         *                          to be accessed by the GPU while rendering the frame).
+         *  @param semaphore_ptr Semaphore to set. Must NOT be nullptr.
          *
          *  @return Index of the swapchain image that the commands should be submitted against.
          **/
-        SwapchainOperationErrorCode acquire_image(Anvil::Semaphore*                   in_opt_semaphore_ptr,
-                                                  uint32_t*                           out_result_index_ptr,
-                                                  bool                                in_should_block = false);
-        SwapchainOperationErrorCode acquire_image(Anvil::Semaphore*                   in_opt_semaphore_ptr,
-                                                  uint32_t                            in_n_mgpu_physical_devices,
-                                                  const Anvil::PhysicalDevice* const* in_mgpu_physical_device_ptrs,
-                                                  uint32_t*                           out_result_index_ptr,
-                                                  bool                                in_should_block = false);
+        uint32_t acquire_image_by_setting_semaphore(Anvil::Semaphore* semaphore_ptr);
 
-        const SwapchainCreateInfo* get_create_info_ptr() const
+        /** Returns format used by swapchain images */
+        VkFormat get_image_format() const
         {
-            return m_create_info_ptr.get();
+            return m_image_format;
         }
 
-        /** Returns height of the swapchain, as specified at creation time */
-        uint32_t get_height() const
+        /** Returns format used by swapchain image views. */
+        VkFormat get_image_view_format() const
         {
-            return m_size.height;
-        }
-
-        /** Return the actual number of swapchain images created. */
-        uint32_t get_n_images() const
-        {
-            return m_n_images;
+            return m_image_view_format;
         }
 
         /** Retrieves an Image instance associated with a swapchain image at index
-         *  @param in_n_swapchain_image.
+         *  @param n_swapchain_image.
          *
          *  Format of all swapchain images can be retrieved by caslling get_image_format().
          *
-         *  @param in_n_swapchain_image Swapchain image index to use for the call.
-         *                              Must be smaller than @param in_n_images specified at construction
-         *                              time.
+         *  @param n_swapchain_image Swapchain image index to use for the call.
+         *                           Must be smaller than @param n_images specified at construction
+         *                           time.
          *
          *  @return As per summary.
          **/
-        Anvil::Image* get_image(uint32_t in_n_swapchain_image) const;
+        Anvil::Image* get_image(uint32_t n_swapchain_image) const;
 
         /** Retrieves an Image View instance associated with a swapchain image at index
          *  @param n_swapchain_image.
          *
          *  Format of all swapchain image views can be retrieved by caslling get_image_view_format().
          *
-         *  @param in_n_swapchain_image Swapchain image index to use for the call.
-         *                              Must be smaller than @param in_n_images specified at construction
-         *                              time.
+         *  @param n_swapchain_image Swapchain image index to use for the call.
+         *                           Must be smaller than @param n_images specified at construction
+         *                           time.
          *
          *  @return As per summary.
          **/
-        Anvil::ImageView* get_image_view(uint32_t in_n_swapchain_image) const;
+        Anvil::ImageView* get_image_view(uint32_t n_swapchain_image) const;
 
-        /* Returns index of the most recently acquired swapchain image.
-         *
-         * @return UINT32_MAX if no image was acquired successfully, otherwise as per description.
-         **/
-        uint32_t get_last_acquired_image_index() const
+        /** Tells how many images the swap-chain encapsulates. */
+        uint32_t get_n_images() const
         {
-            return m_last_acquired_image_index;
+            return m_n_swapchain_images;
+        }
+
+        /** Retrieves parent rendering surface. */
+        const Anvil::RenderingSurface* get_rendering_surface() const
+        {
+            return m_parent_surface_ptr;
         }
 
         /** Retrieves a pointer to the raw Vulkan swapchain handle.  */
@@ -138,87 +152,53 @@ namespace Anvil
             return &m_swapchain;
         }
 
-        VkSwapchainKHR get_swapchain_vk() const
-        {
-            return m_swapchain;
-        }
-
-        /** Returns width of the swapchain. */
-        uint32_t get_width() const
-        {
-            return m_size.width;
-        }
-
-        /* Associates HDR metadata with one or more swapchains.
+        /** Deletes all instantiated image views and re-creates a new set with user-specified
+         *  format.
          *
-         * Requires VK_EXT_hdr_metadata.
-         *
-         * @param in_n_swapchains     Number of swapchains to update.
-         * @param in_swapchains_ptr   At least @param in_n_swapchains swapchains to set HDR metadata for. All defined swapchains must have
-         *                            been created for the same Anvil::BaseDevice instance.
-         * @param in_hdr_metadata_ptr An array of @param in_n_swapchains HDR metadata descriptors to use. Must not be nullptr.
-         */
-        static void set_hdr_metadata(const uint32_t&              in_n_swapchains,
-                                     Anvil::Swapchain**           in_swapchains_ptr_ptr,
-                                     const Anvil::HdrMetadataEXT* in_metadata_items_ptr);
-
-        void set_hdr_metadata(const Anvil::HdrMetadataEXT* in_metadata_ptr)
-        {
-            Anvil::Swapchain* this_ptr = this;
-
-            return Anvil::Swapchain::set_hdr_metadata(1, /* in_n_swapchains */
-                                                     &this_ptr,
-                                                      in_metadata_ptr);
-        }
-
-        /* By default, swapchain instance will transparently destroy the underlying Vulkan swapchain handle, right before
-         * the window is closed.
-         *
-         * There are certain use cases where we want the order to be reversed (ie. the swapchain handle should be destroyed only after
-         * the window is closed). This behavior can be enabled by calling this function with @param in_value set to false.
-         */
-        void set_should_destroy_swapchain_before_parent_window_closes(const bool& in_value)
-        {
-            m_destroy_swapchain_before_parent_window_closes = in_value;
-        }
-
-        const bool& should_destroy_swapchain_before_parent_window_closes()
-        {
-            return m_destroy_swapchain_before_parent_window_closes;
-        }
+         *  @param new_view_format New format to use for the image views. Must not be the same
+         *                         as currently used image view format.
+         **/
+        void set_image_view_format(VkFormat new_view_format);
 
     private:
         /* Private functions */
-
-        /* Constructor. Please see create() for specification */
-        Swapchain(Anvil::SwapchainCreateInfoUniquePtr in_create_info_ptr);
-
         Swapchain           (const Swapchain&);
         Swapchain& operator=(const Swapchain&);
 
-        void destroy_swapchain();
-        bool init             ();
+        virtual ~Swapchain();
 
-        void on_parent_window_about_to_close();
-        void on_present_request_issued      (Anvil::CallbackArgument* in_callback_raw_ptr);
+        void     init     ();
+
 
         /* Private variables */
-        Anvil::SwapchainCreateInfoUniquePtr  m_create_info_ptr;
-        Anvil::FenceUniquePtr                m_image_available_fence_ptr;
-        uint32_t                             m_n_images;  /* number of images created in the swapchain. */
-        std::vector<ImageUniquePtr>          m_image_ptrs;
-        std::vector<ImageViewUniquePtr>      m_image_view_ptrs;
-        uint32_t                             m_last_acquired_image_index;
-        VkExtent2D                           m_size;
-        VkSwapchainKHR                       m_swapchain;
+        Anvil::Device*           m_device_ptr;
+        Anvil::Window*           m_window_ptr;
+        Anvil::Fence**           m_image_available_fence_ptrs;
+        VkFormat                 m_image_format;
+        Anvil::Image**           m_image_ptrs;
+        VkFormat                 m_image_view_format;
+        Anvil::ImageView**       m_image_view_ptrs;
+        uint32_t                 m_n_swapchain_images;
+        Anvil::RenderingSurface* m_parent_surface_ptr;
+        VkPresentModeKHR         m_present_mode;
+        VkSwapchainKHR           m_swapchain;
+        VkImageUsageFlagBits     m_usage_flags;
 
-        bool m_destroy_swapchain_before_parent_window_closes;
+        PFN_vkAcquireNextImageKHR   m_vkAcquireNextImageKHR;
+        PFN_vkCreateSwapchainKHR    m_vkCreateSwapchainKHR;
+        PFN_vkDestroySwapchainKHR   m_vkDestroySwapchainKHR;
+        PFN_vkGetSwapchainImagesKHR m_vkGetSwapchainImagesKHR;
 
-        volatile uint64_t m_n_acquire_counter;
-        volatile uint32_t m_n_acquire_counter_rounded;
-        volatile uint64_t m_n_present_counter;
+        uint32_t m_n_acquire_counter;
+    };
 
-        std::vector<Anvil::Queue*> m_observed_queues;
+    /* Delete functor. Useful for wrapping Swapchain instances in auto pointers. */
+    struct SwapchainDeleter
+    {
+        void operator()(Swapchain* swapchain_ptr)
+        {
+            swapchain_ptr->release();
+        }
     };
 }; /* namespace Anvil */
 

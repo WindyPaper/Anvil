@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2017-2018 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2016 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -31,35 +31,27 @@
 #ifndef WRAPPERS_PIPELINE_CACHE_H
 #define WRAPPERS_PIPELINE_CACHE_H
 
-#include "misc/debug_marker.h"
-#include "misc/mt_safety.h"
+#include "misc/ref_counter.h"
 #include "misc/types.h"
 
 
 namespace Anvil
 {
-    class PipelineCache : public DebugMarkerSupportProvider<PipelineCache>,
-                          public MTSafetySupportProvider
+    class PipelineCache : public RefCounterSupportProvider
     {
     public:
         /* Public functions */
 
         /** Constructor.
          *
-         *  @param in_device_ptr        Vulkan device to initialize the pipeline cache with.
-         *  @param in_mt_safe           True if MT-safety should be enforced for functions that operate on the
-         *                              underlying Vulkan handle.
-         *  @param in_initial_data_size Number of bytes available under @param in_initial_data. Can be 0.
-         *  @param in_initial_data      Initial data to initialize the new pipeline cache instance with.
-         *                              May be nullptr if @param in_initial_data_size is 0.
+         *  @param device_ptr        Vulkan device to initialize the pipeline cache with.
+         *  @param initial_data_size Number of bytes available under @param initial_data. Can be 0.
+         *  @param initial_data      Initial data to initialize the new pipeline cache instance with.
+         *                           May be nullptr if @param initial_data_size is 0.
          **/
-        static Anvil::PipelineCacheUniquePtr create(const Anvil::BaseDevice* in_device_ptr,
-                                                    bool                     in_mt_safe,
-                                                    size_t                   in_initial_data_size = 0,
-                                                    const void*              in_initial_data      = nullptr);
-
-        /** Destroys the Vulkan counterpart and unregisters the wrapper instance from the object tracker. */
-        virtual ~PipelineCache();
+        PipelineCache(Anvil::Device* device_ptr,
+                      size_t         initial_data_size = 0,
+                      const void*    initial_data      = nullptr);
 
         /** Retrieves pipeline cache data.
          *
@@ -69,43 +61,35 @@ namespace Anvil
          *
          *  @return true if successful, false otherwise.
          **/
-        bool get_data(size_t* out_n_data_bytes_ptr,
-                      void*   out_data_ptr);
+        bool get_data(size_t*      out_n_data_bytes_ptr,
+                      const void** out_data_ptr);
 
-        /** Retrieves raw Vulkan pipeline cache handle.
-         *
-         *  NOTE: Clients must guarantee MT-safety when operating directly with the Vulkan handle.
-         */
+        /** Retrieves raw Vulkan pipeline cache handle */
         const VkPipelineCache& get_pipeline_cache() const
         {
             return m_pipeline_cache;
         }
 
-        /** Adds cached pipelines in @param in_src_cache_ptrs to this pipeline instance.
+        /** Adds cached pipelines in @param src_cache_ptrs to this pipeline instance.
          *
-         *  @param in_n_pipeline_caches Number of pipeline caches under @param in_src_cache_ptrs.
-         *  @param in_src_cache_ptrs    Pipeline caches to merge with. Must not be nullptr.
+         *  @param n_pipeline_caches Number of pipeline caches under @param src_cache_ptrs.
+         *  @param src_cache_ptrs    Pipeline caches to merge with. Must not be nullptr.
          *
          *  @return true if successful, false otherwise.
          **/
-        bool merge(uint32_t                           in_n_pipeline_caches,
-                   const Anvil::PipelineCache* const* in_src_cache_ptrs);
+        bool merge(uint32_t                           n_pipeline_caches,
+                   const Anvil::PipelineCache* const* src_cache_ptrs);
 
     private:
         /* Private functions */
-
-        /* Constructor. See create() for specification */
-        PipelineCache(const Anvil::BaseDevice* in_device_ptr,
-                      bool                     in_mt_safe,
-                      size_t                   in_initial_data_size,
-                      const void*              in_initial_data);
-
         PipelineCache           (const PipelineCache&);
         PipelineCache& operator=(const PipelineCache&);
 
+        virtual ~PipelineCache();
+
         /* Private variables */
-        const Anvil::BaseDevice* m_device_ptr;
-        VkPipelineCache          m_pipeline_cache;
+        Anvil::Device*  m_device_ptr;
+        VkPipelineCache m_pipeline_cache;
     };
 }; /* namespace Anvil */
 

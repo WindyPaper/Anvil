@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2017-2018 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2016 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -31,82 +31,75 @@
 #ifndef WRAPPERS_INSTANCE_H
 #define WRAPPERS_INSTANCE_H
 
-#include "misc/extensions.h"
-#include "misc/instance_create_info.h"
-#include "misc/library.h"
-#include "misc/mt_safety.h"
+#include "misc/ref_counter.h"
 #include "misc/types.h"
-#include "wrappers/debug_messenger.h"
+#include "wrappers/rendering_surface.h"
 
 namespace Anvil
 {
-    class Instance : public Anvil::MTSafetySupportProvider
+    /** Debug call-back function prototype */
+    typedef VkBool32 (*PFNINSTANCEDEBUGCALLBACKPROC)(VkDebugReportFlagsEXT      message_flags,
+                                                     VkDebugReportObjectTypeEXT object_type,
+                                                     const char*                layer_prefix,
+                                                     const char*                message,
+                                                     void*                      user_arg);
+
+    class Instance : public RefCounterSupportProvider
     {
     public:
-        /** Destructor */
-        virtual ~Instance();
+        /* Public functions */
 
-        /** Creates a new Instance wrapper instance. **/
-        static Anvil::InstanceUniquePtr create(Anvil::InstanceCreateInfoUniquePtr in_create_info_ptr);
+        /** Creates a new Instance wrapper instance. This process is executed in the following steps:
+         *
+         *  1. If @param opt_pfn_validation_callback_proc is specified, available instance layers are
+         *     enumerated. Layers which support VK_EXT_debug_report extension, are cached and used
+         *     in step 2.
+         *  2. A new Vulkan instance is created.
+         *  3. Available physical devices are enumerated.
+         *  4. Instance-level function pointers are extracted.
+         *
+         *  Only one Instance wrapper instance should be created during application's life-time.
+         *
+         *
+         *  @param app_name                 Name of the application, to be passed in VkCreateInstanceInfo
+         *                                  structure.
+         *  @param engine_name              Name of the engine, to be passed in VkCreateInstanceInfo
+         *                                  structure.
+         *  @param opt_pfn_validation_proc  If not nullptr, the specified handled will be called whenever
+         *                                  a call-back from any of the validation layers is received.
+         *                                  Ignored otherwise.
+         *  @param validation_proc_user_arg If @param opt_pfn_validation_proc is not nullptr, this argument
+         *                                  will be passed to @param opt_pfn_validation_proc every time
+         *                                  a debug callback is received. Ignored otherwise.
+         **/
+        Instance(const char*                  app_name,
+                 const char*                  engine_name,
+                 PFNINSTANCEDEBUGCALLBACKPROC opt_pfn_validation_callback_proc,
+                 void*                        validation_proc_user_arg);
 
-        const Anvil::APIVersion& get_api_version() const
+        /** Creates a new RenderingSurface wrapper instance.
+         *
+         *  @param physical_device_ptr Physical device to create the rendering surface for. Must not be nullptr.
+         *  @param window_ptr          Rendering window to initialize the rendering surface for.
+         *
+         *  @return As per description.
+         **/
+        RenderingSurface* create_rendering_surface(Anvil::PhysicalDevice* physical_device_ptr,
+                                                   Anvil::Window*         window_ptr)
         {
-            return m_api_version;
-        }
-
-        const Anvil::IExtensionInfoInstance<bool>* get_enabled_extensions_info() const
-        {
-            return m_enabled_extensions_info_ptr->get_instance_extension_info();
-        }
-
-        const ExtensionEXTDebugReportEntrypoints& get_extension_ext_debug_report_entrypoints() const;
-        const ExtensionEXTDebugUtilsEntrypoints&  get_extension_ext_debug_utils_entrypoints () const;
-
-        const ExtensionKHRExternalFenceCapabilitiesEntrypoints& get_extension_khr_external_fence_capabilities_entrypoints() const;
-
-        const ExtensionKHRExternalMemoryCapabilitiesEntrypoints& get_extension_khr_external_memory_capabilities_entrypoints() const;
-
-        const ExtensionKHRExternalSemaphoreCapabilitiesEntrypoints& get_extension_khr_external_semaphore_capabilities_entrypoints() const;
-
-        /** Returns a container with entry-points to functions introduced by VK_KHR_get_physical_device_properties2.
-         *
-         *  Will fire an assertion failure if the extension is not supported.
-         **/
-        const ExtensionKHRGetPhysicalDeviceProperties2& get_extension_khr_get_physical_device_properties2_entrypoints() const;
-
-        /** Returns a container with entry-points to functions introduced by VK_KHR_surface.
-         *
-         *  Will fire an assertion failure if the extension is not supported.
-         **/
-        const ExtensionKHRSurfaceEntrypoints& get_extension_khr_surface_entrypoints() const;
-
-#if defined(_WIN32)
-    #if defined(ANVIL_INCLUDE_WIN3264_WINDOW_SYSTEM_SUPPORT)
-        /** Returns a container with entry-points to functions introduced by VK_KHR_win32_surface.
-         *
-         *  Will fire an assertion failure if the extension is not supported.
-         **/
-        const ExtensionKHRWin32SurfaceEntrypoints& get_extension_khr_win32_surface_entrypoints() const;
-    #endif
+            return new Anvil::RenderingSurface(this,
+                                               physical_device_ptr,
+                                               window_ptr,
+#ifdef _WIN32
+                                               m_vkCreateWin32SurfaceKHR,
 #else
-    #if defined(ANVIL_INCLUDE_XCB_WINDOW_SYSTEM_SUPPORT)
-        /** Returns a container with entry-points to functions introduced by VK_KHR_xcb_surface.
-         *
-         *  Will fire an assertion failure if the extension is not supported.
-         **/
-        const ExtensionKHRXcbSurfaceEntrypoints& get_extension_khr_xcb_surface_entrypoints() const;
-    #endif
+                                               m_vkCreateXcbSurfaceKHR,
 #endif
-
-        /** Returns a container with entry-points to functions introduced by VK_KHR_device_group_creation extension.
-         *
-         *  Will fire an assertion failure if the extension is not supported.
-         **/
-        const ExtensionKHRDeviceGroupCreationEntrypoints& get_extension_khr_device_group_creation_entrypoints() const;
-
-        const Anvil::InstanceCreateInfo* get_create_info_ptr() const
-        {
-            return m_create_info_ptr.get();
+                                               m_vkDestroySurfaceKHR,
+                                               m_vkGetPhysicalDeviceSurfaceCapabilitiesKHR,
+                                               m_vkGetPhysicalDeviceSurfaceFormatsKHR,
+                                               m_vkGetPhysicalDeviceSurfacePresentModesKHR,
+                                               m_vkGetPhysicalDeviceSurfaceSupportKHR);
         }
 
         /** Returns a raw wrapped VkInstance handle. */
@@ -115,42 +108,17 @@ namespace Anvil
             return m_instance;
         }
 
-        /** Returns information about @param in_n_physical_device_group -th physical device group, as reported
-         *  for this instance.
+        /** Returns a PhysicalDevice wrapper for a physical device at index @param n_device.
          *
-         *  @param in_n_physical_device_group Index of the physical device group to retrieve properties of.
-         *                                    This value must NOT be equal or larger than the value reported by
-         *                                    get_n_physical_device_groups().
-         *
-         ** @return As per description.
-         **/
-        const Anvil::PhysicalDeviceGroup& get_physical_device_group(uint32_t in_n_physical_device_group) const
-        {
-            anvil_assert(m_physical_device_groups.size() > in_n_physical_device_group);
-
-            return m_physical_device_groups.at(in_n_physical_device_group);
-        }
-
-        /** Returns a PhysicalDevice wrapper for a physical device at index @param in_n_device.
-         *
-         *  @param in_n_device Index of the physical device to retrieve the wrapper instance for.
-         *                     This value must NOT be equal or larger than the value reported by
-         *                     get_n_physical_devices().
+         *  @param n_device Index of the physical device to retrieve the wrapper instance for.
+         *                  This value must NOT be equal or larger than the value reported by
+         *                  get_n_physical_devices().
          *
          ** @return As per description.
          **/
-        const Anvil::PhysicalDevice* get_physical_device(uint32_t in_n_device) const
+        Anvil::PhysicalDevice* get_physical_device(uint32_t n_device) const
         {
-            return m_physical_devices.at(in_n_device).get();
-        }
-
-        /** Returns the total number of physical device groups supported on the running platform.
-         *
-         *  Will return 0 if VK_KHR_physical_device_group_creation is not supported.
-         */
-        uint32_t get_n_physical_device_groups() const
-        {
-            return static_cast<uint32_t>(m_physical_device_groups.size() );
+            return m_physical_devices[n_device];
         }
 
         /** Returns the total number of physical devices supported on the running platform. */
@@ -159,91 +127,83 @@ namespace Anvil
             return static_cast<uint32_t>(m_physical_devices.size() );
         }
 
-        bool is_instance_extension_enabled(const char*        in_extension_name) const;
-        bool is_instance_extension_enabled(const std::string& in_extension_name) const
-        {
-            return is_instance_extension_enabled(in_extension_name.c_str() );
-        }
-
         /** Tells whether the specified instance extension is supported.
          *
-         *  @param in_extension_name Name of the extension to use for the query.
+         *  @param extension_name Name of the extension to use for the query.
          *
          *  @return true if the extension was reported as supported, false otherwise.
          **/
-        bool is_instance_extension_supported(const char*        in_extension_name) const;
-        bool is_instance_extension_supported(const std::string& in_extension_name) const
-        {
-            return is_instance_extension_supported(in_extension_name.c_str() );
-        }
+        bool is_instance_extension_supported(const char* extension_name) const;
 
         /** Tells if validation support has been requested for this Vulkan Instance wrapper */
         bool is_validation_enabled() const
         {
-            return m_create_info_ptr->get_validation_callback() != nullptr;
+            return m_pfn_validation_callback_proc != nullptr;
         }
 
     private:
         /* Private functions */
-
-        /** Private constructor. Please use create() function instead. */
-        Instance(Anvil::InstanceCreateInfoUniquePtr in_create_info_ptr);
+        virtual ~Instance();
 
         Instance& operator=(const Instance&);
         Instance           (const Instance&);
 
-        void destroy                         ();
-        void enumerate_instance_layers       ();
-        void enumerate_layer_extensions      (Anvil::Layer* layer_ptr);
-        void enumerate_physical_device_groups();
-        void enumerate_physical_devices      ();
-        bool init                            ();
-        void init_debug_callbacks            ();
-        void init_func_pointers              ();
+        void enumerate_instance_layers ();
+        void enumerate_layer_extensions(Anvil::Layer* layer_ptr);
+        void enumerate_physical_devices();
+        void init                      ();
+        void init_debug_callbacks      ();
+        void init_func_pointers        ();
 
-        bool init_vk_func_ptrs();
-
-        void debug_callback_handler(const Anvil::DebugMessageSeverityFlagBits& in_severity,
-                                    const char*                                in_message_ptr);
+        static VkBool32 VKAPI_PTR debug_callback_pfn_proc(VkDebugReportFlagsEXT      message_flags,
+                                                          VkDebugReportObjectTypeEXT object_type,
+                                                          uint64_t                   src_object,
+                                                          size_t                     location,
+                                                          int32_t                    msg_code,
+                                                          const char*                layer_prefix_ptr,
+                                                          const char*                message_ptr,
+                                                          void*                      user_data);
 
         /* Private variables */
         VkInstance m_instance;
 
-        ExtensionEXTDebugReportEntrypoints                   m_ext_debug_report_entrypoints;
-        ExtensionEXTDebugUtilsEntrypoints                    m_ext_debug_utils_entrypoints;
-        ExtensionKHRDeviceGroupCreationEntrypoints           m_khr_device_group_creation_entrypoints;
-        ExtensionKHRExternalFenceCapabilitiesEntrypoints     m_khr_external_fence_capabilities_entrypoints;
-        ExtensionKHRExternalMemoryCapabilitiesEntrypoints    m_khr_external_memory_capabilities_entrypoints;
-        ExtensionKHRExternalSemaphoreCapabilitiesEntrypoints m_khr_external_semaphore_capabilities_entrypoints;
-        ExtensionKHRGetPhysicalDeviceProperties2             m_khr_get_physical_device_properties2_entrypoints;
-        ExtensionKHRSurfaceEntrypoints                       m_khr_surface_entrypoints;
+        /* VK_KHR_swapchain function pointers */
+        PFN_vkDestroySurfaceKHR                       m_vkDestroySurfaceKHR;
+        PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR m_vkGetPhysicalDeviceSurfaceCapabilitiesKHR;
+        PFN_vkGetPhysicalDeviceSurfaceFormatsKHR      m_vkGetPhysicalDeviceSurfaceFormatsKHR;
+        PFN_vkGetPhysicalDeviceSurfacePresentModesKHR m_vkGetPhysicalDeviceSurfacePresentModesKHR;
+        PFN_vkGetPhysicalDeviceSurfaceSupportKHR      m_vkGetPhysicalDeviceSurfaceSupportKHR;
 
-        #if defined(_WIN32)
-        #endif
-
+        /* VK_KHR_device_swapchain function pointers */
         #ifdef _WIN32
-            #if defined(ANVIL_INCLUDE_WIN3264_WINDOW_SYSTEM_SUPPORT)
-                ExtensionKHRWin32SurfaceEntrypoints m_khr_win32_surface_entrypoints;
-            #endif
+            PFN_vkCreateWin32SurfaceKHR                        m_vkCreateWin32SurfaceKHR;
+            PFN_vkGetPhysicalDeviceWin32PresentationSupportKHR m_vkGetPhysicalDeviceWin32PresentationSupportKHR;
         #else
-            #if defined(ANVIL_INCLUDE_XCB_WINDOW_SYSTEM_SUPPORT)
-                ExtensionKHRXcbSurfaceEntrypoints m_khr_xcb_surface_entrypoints;
-            #endif
+            PFN_vkCreateXcbSurfaceKHR                          m_vkCreateXcbSurfaceKHR;
         #endif
 
-        Anvil::APIVersion                  m_api_version;
-        Anvil::InstanceCreateInfoUniquePtr m_create_info_ptr;
+        /* DebugReport extension function pointers and data */
+        VkDebugReportCallbackEXT            m_debug_callback_data;
+        PFN_vkCreateDebugReportCallbackEXT  m_vkCreateDebugReportCallbackEXT;
+        PFN_vkDestroyDebugReportCallbackEXT m_vkDestroyDebugReportCallbackEXT;
 
-        std::unique_ptr<Anvil::ExtensionInfo<bool> > m_enabled_extensions_info_ptr;
-        std::unique_ptr<Anvil::ExtensionInfo<bool> > m_supported_extensions_info_ptr;
+        const char*                  m_app_name;
+        const char*                  m_engine_name;
+        PFNINSTANCEDEBUGCALLBACKPROC m_pfn_validation_callback_proc;
+        void*                        m_validation_proc_user_arg;
 
-        Anvil::DebugMessengerUniquePtr                       m_debug_messenger_ptr;
-        Anvil::Layer                                         m_global_layer;
-        std::vector<Anvil::PhysicalDeviceGroup>              m_physical_device_groups;
-        std::vector<std::unique_ptr<Anvil::PhysicalDevice> > m_physical_devices;
-        std::vector<Anvil::Layer>                            m_supported_layers;
+        std::vector<Anvil::Extension>       m_extensions;
+        std::vector<Anvil::PhysicalDevice*> m_physical_devices;
+        std::vector<Anvil::Layer>           m_supported_layers;
+    };
 
-        friend struct InstanceDeleter;
+    /** Delete functor. Useful if you need to wrap the Vulkan instance in an auto pointer */
+    struct InstanceDeleter
+    {
+        void operator()(Instance* instance_ptr) const
+        {
+            instance_ptr->release();
+        }
     };
 }; /* namespace Anvil */
 

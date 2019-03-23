@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2017-2018 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2016 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -30,8 +30,6 @@
 #ifndef WRAPPERS_RENDERING_SURFACE_H
 #define WRAPPERS_RENDERING_SURFACE_H
 
-#include "misc/debug_marker.h"
-#include "misc/mt_safety.h"
 #include "misc/types.h"
 #include "wrappers/device.h"
 #include "wrappers/physical_device.h"
@@ -41,28 +39,62 @@
 namespace Anvil
 {
     /* Wrapper class for Vulkan rendering surfaces */
-    class RenderingSurface : public DebugMarkerSupportProvider<RenderingSurface>,
-                             public MTSafetySupportProvider
+    class RenderingSurface : public RefCounterSupportProvider
     {
     public:
         /* Public type definitions */
+        typedef struct RenderingSurfaceFormat
+        {
+            VkColorSpaceKHR color_space;
+            VkFormat        format;
+
+            /* Constructor. */
+            RenderingSurfaceFormat(VkSurfaceFormatKHR& in_surface_format)
+            {
+                color_space = in_surface_format.colorSpace;
+                format      = in_surface_format.format;
+            }
+
+            /** Comparison operator for _vulkan_surface_format and in_format types.
+             *
+             *  @param in_format Right-side value.
+             *
+             *  @return true if @param in_format matches _vulkan_surface_format::format value, false
+             *          otherwise.
+             **/
+            bool operator==(const VkFormat& in_format) const
+            {
+                return (format == in_format);
+            }
+        } RenderingSurfaceFormat;
 
         /* Public functions */
 
-        /** Creates a single Vulkan rendering surface instance and registers the object in
-         *  Object Tracker. */
-        static Anvil::RenderingSurfaceUniquePtr create(Anvil::RenderingSurfaceCreateInfoUniquePtr in_create_info_ptr);
-
-        /** Destructor
+        /** Constructor.
          *
-         *  Releases the underlying Vulkan rendering surface instance and unregisters the
-         *  object from the Object Tracker.
-         **/
-        virtual ~RenderingSurface();
+         *  Creates a single Vulkan rendering surface instance and registers the object in
+         *  Object Tracker.
+         *
+         */
+        RenderingSurface(Anvil::Instance*                              instance_ptr,
+                         Anvil::PhysicalDevice*                        physical_device_ptr,
+                         Anvil::Window*                                window_ptr,
+#ifdef _WIN32
+                         PFN_vkCreateWin32SurfaceKHR                   pfn_create_win32_surface_khr_proc,
+#else
+                         PFN_vkCreateXcbSurfaceKHR                     pfn_create_xcb_surface_khr_proc,
+#endif
+                         PFN_vkDestroySurfaceKHR                       pfn_destroy_surface_khr_proc,
+                         PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR pfn_get_physical_device_surface_capabilities_khr_proc,
+                         PFN_vkGetPhysicalDeviceSurfaceFormatsKHR      pfn_get_physical_device_surface_formats_khr_proc,
+                         PFN_vkGetPhysicalDeviceSurfacePresentModesKHR pfn_get_physical_device_surface_present_modes_khr_proc,
+                         PFN_vkGetPhysicalDeviceSurfaceSupportKHR      pfn_get_physical_device_surface_support_khr_proc);
 
         /** Returns rendering surface capabilities */
-        bool get_capabilities(const Anvil::PhysicalDevice* in_physical_device_ptr,
-                              Anvil::SurfaceCapabilities*  out_surface_caps_ptr) const;
+        const VkSurfaceCapabilitiesKHR& get_capabilities() const
+        {
+            return m_capabilities;
+        }
 
         /** Returns rendering surface's height */
         uint32_t get_height() const
@@ -72,27 +104,29 @@ namespace Anvil
             return m_height;
         }
 
-        /** Returns logical device which was used to create this surface */
-        const Anvil::BaseDevice* get_device() const
+        /** Returns physical device which was used to create this surface */
+        const Anvil::PhysicalDevice* get_physical_device() const
         {
-            return m_device_ptr;
+            return m_physical_device_ptr;
         }
 
-        /** Returns queue family indices which support presentation on a given physical device */
-        bool get_queue_families_with_present_support(const Anvil::PhysicalDevice*  in_physical_device_ptr,
-                                                     const std::vector<uint32_t>** out_result_ptr) const;
-
         /** Returns composite alpha modes supported by the rendering surface */
-        bool get_supported_composite_alpha_flags(const Anvil::PhysicalDevice* in_physical_device_ptr,
-                                                 Anvil::CompositeAlphaFlags*  out_result_ptr) const;
+        VkCompositeAlphaFlagsKHR get_supported_composite_alpha_flags() const
+        {
+            return static_cast<VkCompositeAlphaFlagsKHR>(m_supported_composite_alpha_flags);
+        }
 
         /** Returns transformations supported by the rendering surface */
-        bool get_supported_transformations(const Anvil::PhysicalDevice*  in_physical_device_ptr,
-                                           Anvil::SurfaceTransformFlags* out_result_ptr) const;
+        VkSurfaceTransformFlagsKHR get_supported_transformations() const
+        {
+            return static_cast<VkSurfaceTransformFlagsKHR>(m_supported_transformations);
+        }
 
         /** Returns flags corresponding to image usage supported by the rendering surface */
-        bool get_supported_usages(const Anvil::PhysicalDevice* in_physical_device_ptr,
-                                  ImageUsageFlags*             out_result_ptr) const;
+        VkImageUsageFlags get_supported_usages() const
+        {
+            return static_cast<VkImageUsageFlags>(m_supported_usages);
+        }
 
         /** Retrieves a raw handle to the underlying Vulkan Rendering Surface */
         VkSurfaceKHR get_surface() const
@@ -116,82 +150,81 @@ namespace Anvil
 
         /* Tells whether the specified image format can be used for swapchain image initialization, using
          * this rendering surface. */
-        bool is_compatible_with_image_format(const Anvil::PhysicalDevice* in_physical_device_ptr,
-                                             Anvil::Format                in_image_format,
-                                             bool*                        out_result_ptr) const;
+        bool is_compatible_with_image_format(VkFormat image_format) const
+        {
+            return std::find(m_supported_formats.begin(),
+                             m_supported_formats.end(),
+                             image_format) != m_supported_formats.end();
+        }
+
+        /* Tells whether the rendering surface can be presented using the specified queue */
+        VkResult supports_presentation_for_queue(Anvil::Queue* queue_ptr,
+                                                 VkBool32*     out_result_ptr) const
+        {
+            return m_vkGetPhysicalDeviceSurfaceSupportKHR(queue_ptr->get_parent_device()->get_physical_device()->get_physical_device(),
+                                                          queue_ptr->get_queue_family_index(),
+                                                          m_surface,
+                                                          out_result_ptr);
+        }
 
         /* Tells whether the specified presentation mode is supported by the rendering surface */
-        bool supports_presentation_mode(const Anvil::PhysicalDevice* in_physical_device_ptr,
-                                        Anvil::PresentModeKHR        in_presentation_mode,
-                                        bool*                        out_result_ptr) const;
-
-        void update_surface_extents() const;
+        bool supports_presentation_mode(VkPresentModeKHR presentation_mode) const
+        {
+            return std::find(m_supported_presentation_modes.begin(),
+                             m_supported_presentation_modes.end(),
+                             presentation_mode) != m_supported_presentation_modes.end();
+        }
 
     private:
-        /* Private type definitions */
-        typedef uint32_t DeviceGroupIndex;
-
-        typedef struct RenderingSurfaceFormat
-        {
-            Anvil::ColorSpaceKHR color_space;
-            Anvil::Format        format;
-
-            /* Constructor. */
-            RenderingSurfaceFormat(Anvil::SurfaceFormatKHR& in_surface_format)
-            {
-                color_space = in_surface_format.color_space;
-                format      = static_cast<Anvil::Format>(in_surface_format.format);
-            }
-
-            /** Comparison operator for _vulkan_surface_format and in_format types.
-             *
-             *  @param in_format Right-side value.
-             *
-             *  @return true if @param in_format matches _vulkan_surface_format::format value, false
-             *          otherwise.
-             **/
-            bool operator==(const Anvil::Format& in_format) const
-            {
-                return (format == in_format);
-            }
-        } RenderingSurfaceFormat;
-
-        typedef struct PhysicalDeviceCapabilities
-        {
-            Anvil::SurfaceCapabilities          capabilities;
-            std::vector<RenderingSurfaceFormat> supported_formats;
-            std::vector<Anvil::PresentModeKHR>  supported_presentation_modes;
-            Anvil::SurfaceTransformFlags        supported_transformations;
-            ImageUsageFlags                     supported_usages;
-
-            std::vector<uint32_t>               present_capable_queue_fams;
-
-            Anvil::CompositeAlphaFlags          supported_composite_alpha_flags;
-
-            PhysicalDeviceCapabilities()
-            {
-                /* Stub */
-            }
-        } PhysicalDeviceCapabilities;
-
         /* Private functions */
-
-        /* Constructor. Please see create() for specification */
-        RenderingSurface(Anvil::RenderingSurfaceCreateInfoUniquePtr in_create_info_ptr);
-
         RenderingSurface           (const RenderingSurface&);
         RenderingSurface& operator=(const RenderingSurface&);
 
-        void cache_surface_properties();
-        bool init                    ();
+        /** Destructor
+         *
+         *  Releases the underlying Vulkan rendering surface instance and unregisters the
+         *  object from the Object Tracker.
+         **/
+        virtual ~RenderingSurface();
+
+        void cache_surface_properties(Anvil::Window* window_ptr);
 
         /* Private variables */
-        Anvil::RenderingSurfaceCreateInfoUniquePtr m_create_info_ptr;
+        Anvil::Instance*       m_instance_ptr;
+        Anvil::PhysicalDevice* m_physical_device_ptr;
 
-        mutable uint32_t                                       m_height;
-        std::map<DeviceGroupIndex, PhysicalDeviceCapabilities> m_physical_device_capabilities;
-        VkSurfaceKHR                                           m_surface;
-        mutable uint32_t                                       m_width;
+        VkSurfaceCapabilitiesKHR m_capabilities;
+        VkSurfaceKHR             m_surface;
+
+        std::vector<RenderingSurfaceFormat> m_supported_formats;
+        std::vector<VkPresentModeKHR>       m_supported_presentation_modes;
+
+        uint32_t                      m_height;
+        VkCompositeAlphaFlagBitsKHR   m_supported_composite_alpha_flags;
+        VkSurfaceTransformFlagBitsKHR m_supported_transformations;
+        VkImageUsageFlagBits          m_supported_usages;
+        uint32_t                      m_width;
+
+        #ifdef _WIN32
+            PFN_vkCreateWin32SurfaceKHR m_vkCreateWin32SurfaceKHR;
+        #else
+            PFN_vkCreateXcbSurfaceKHR   m_vkCreateXcbSurfaceKHR;
+        #endif
+
+        PFN_vkDestroySurfaceKHR                       m_vkDestroySurfaceKHR;
+        PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR m_vkGetPhysicalDeviceSurfaceCapabilitiesKHR;
+        PFN_vkGetPhysicalDeviceSurfaceFormatsKHR      m_vkGetPhysicalDeviceSurfaceFormatsKHR;
+        PFN_vkGetPhysicalDeviceSurfacePresentModesKHR m_vkGetPhysicalDeviceSurfacePresentModesKHR;
+        PFN_vkGetPhysicalDeviceSurfaceSupportKHR      m_vkGetPhysicalDeviceSurfaceSupportKHR;
+    };
+
+    /** Delete functor. Useful if you need to wrap the rendering surface instance in an auto pointer */
+    struct RenderingSurfaceDeleter
+    {
+        void operator()(RenderingSurface* surface_ptr) const
+        {
+            surface_ptr->release();
+        }
     };
 }; /* namespace Anvil */
 

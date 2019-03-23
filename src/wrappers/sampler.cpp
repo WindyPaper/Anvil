@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2017-2018 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2016 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,141 +22,92 @@
 
 #include "misc/debug.h"
 #include "misc/object_tracker.h"
-#include "misc/sampler_create_info.h"
-#include "misc/struct_chainer.h"
 #include "wrappers/device.h"
-#include "wrappers/physical_device.h"
 #include "wrappers/sampler.h"
-#include "wrappers/sampler_ycbcr_conversion.h"
 
 /** Please see header for specification */
-Anvil::Sampler::Sampler(Anvil::SamplerCreateInfoUniquePtr in_create_info_ptr)
-    :DebugMarkerSupportProvider(in_create_info_ptr->get_device(),
-                                Anvil::ObjectType::SAMPLER),
-     MTSafetySupportProvider   (Anvil::Utils::convert_mt_safety_enum_to_boolean(in_create_info_ptr->get_mt_safety(),
-                                                                                in_create_info_ptr->get_device   () ))
+Anvil::Sampler::Sampler(Anvil::Device*       device_ptr,
+                        VkFilter             mag_filter,
+                        VkFilter             min_filter,
+                        VkSamplerMipmapMode  mipmap_mode,
+                        VkSamplerAddressMode address_mode_u,
+                        VkSamplerAddressMode address_mode_v,
+                        VkSamplerAddressMode address_mode_w,
+                        float                lod_bias,
+                        float                max_anisotropy,
+                        bool                 compare_enable,
+                        VkCompareOp          compare_op,
+                        float                min_lod,
+                        float                max_lod,
+                        VkBorderColor        border_color,
+                        bool                 use_unnormalized_coordinates)
+    :m_address_mode_u              (address_mode_u),
+     m_address_mode_v              (address_mode_v),
+     m_address_mode_w              (address_mode_w),
+     m_border_color                (border_color),
+     m_compare_enable              (compare_enable),
+     m_compare_op                  (compare_op),
+     m_device_ptr                  (device_ptr),
+     m_lod_bias                    (lod_bias),
+     m_mag_filter                  (mag_filter),
+     m_max_anisotropy              (max_anisotropy),
+     m_max_lod                     (max_lod),
+     m_min_filter                  (min_filter),
+     m_min_lod                     (min_lod),
+     m_mipmap_mode                 (mipmap_mode),
+     m_sampler                     (VK_NULL_HANDLE),
+     m_use_unnormalized_coordinates(m_use_unnormalized_coordinates)
 {
-    m_create_info_ptr = std::move(in_create_info_ptr);
+    VkSamplerCreateInfo sampler_create_info;
+    VkResult            result;
+
+    /* Spawn a new sampler */
+    sampler_create_info.addressModeU            = address_mode_u;
+    sampler_create_info.addressModeV            = address_mode_v;
+    sampler_create_info.addressModeW            = address_mode_w;
+    sampler_create_info.anisotropyEnable        = (max_anisotropy > 1.0f);
+    sampler_create_info.borderColor             = border_color;
+    sampler_create_info.compareEnable           = compare_enable;
+    sampler_create_info.compareOp               = compare_op;
+    sampler_create_info.flags                   = 0;
+    sampler_create_info.magFilter               = mag_filter;
+    sampler_create_info.maxAnisotropy           = max_anisotropy;
+    sampler_create_info.maxLod                  = max_lod;
+    sampler_create_info.minFilter               = min_filter;
+    sampler_create_info.minLod                  = min_lod;
+    sampler_create_info.mipLodBias              = lod_bias;
+    sampler_create_info.mipmapMode              = mipmap_mode;
+    sampler_create_info.pNext                   = nullptr;
+    sampler_create_info.sType                   = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    sampler_create_info.unnormalizedCoordinates = use_unnormalized_coordinates;
+
+    result = vkCreateSampler(m_device_ptr->get_device_vk(),
+                            &sampler_create_info,
+                             nullptr, /* pAllocator */
+                            &m_sampler);
+    anvil_assert_vk_call_succeeded(result);
 
     /* Register the event instance */
-    Anvil::ObjectTracker::get()->register_object(Anvil::ObjectType::SAMPLER,
-                                                 this);
+    Anvil::ObjectTracker::get()->register_object(Anvil::ObjectTracker::OBJECT_TYPE_SAMPLER,
+                                                  this);
 }
 
-/* Please see header for specification */
+/** Destructor.
+ *
+ *  Releases the underlying Vulkan Sampler instance and signs the wrapper object out from
+ *  the Object Tracker.
+ **/
 Anvil::Sampler::~Sampler()
 {
-    Anvil::ObjectTracker::get()->unregister_object(Anvil::ObjectType::SAMPLER,
-                                                    this);
-
     if (m_sampler != VK_NULL_HANDLE)
     {
-        lock();
-        {
-            Anvil::Vulkan::vkDestroySampler(m_device_ptr->get_device_vk(),
-                                            m_sampler,
-                                            nullptr /* pAllocator */);
-        }
-        unlock();
+        vkDestroySampler(m_device_ptr->get_device_vk(),
+                         m_sampler,
+                         nullptr /* pAllocator */);
 
         m_sampler = VK_NULL_HANDLE;
     }
-}
 
-/* Please see header for specification */
-Anvil::SamplerUniquePtr Anvil::Sampler::create(Anvil::SamplerCreateInfoUniquePtr in_create_info_ptr)
-{
-    SamplerUniquePtr result_ptr(nullptr,
-                                std::default_delete<Sampler>() );
-
-    result_ptr.reset(
-        new Anvil::Sampler(std::move(in_create_info_ptr) )
-    );
-
-    if (result_ptr != nullptr)
-    {
-        if (!result_ptr->init() )
-        {
-            result_ptr.reset();
-        }
-    }
-
-    return result_ptr;
-}
-
-bool Anvil::Sampler::init()
-{
-    VkResult                                  result                      (VK_ERROR_INITIALIZATION_FAILED);
-    const auto                                sampler_reduction_mode      (m_create_info_ptr->get_sampler_reduction_mode      () );
-    const auto&                               sampler_ycbcr_conversion_ptr(m_create_info_ptr->get_sampler_ycbcr_conversion_ptr() );
-    Anvil::StructChainer<VkSamplerCreateInfo> struct_chainer;
-
-    ANVIL_REDUNDANT_VARIABLE(result);
-
-    /* Spawn a new sampler */
-    {
-        const auto          max_anisotropy      = m_create_info_ptr->get_max_anisotropy();
-        VkSamplerCreateInfo sampler_create_info;
-
-        sampler_create_info.addressModeU            = static_cast<VkSamplerAddressMode>(m_create_info_ptr->get_address_mode_u() );
-        sampler_create_info.addressModeV            = static_cast<VkSamplerAddressMode>(m_create_info_ptr->get_address_mode_v() );
-        sampler_create_info.addressModeW            = static_cast<VkSamplerAddressMode>(m_create_info_ptr->get_address_mode_w() );
-        sampler_create_info.anisotropyEnable        = (max_anisotropy > 1.0f) ? VK_TRUE : VK_FALSE;
-        sampler_create_info.borderColor             = static_cast<VkBorderColor>(m_create_info_ptr->get_border_color() );
-        sampler_create_info.compareEnable           = m_create_info_ptr->is_compare_enabled() ? VK_TRUE : VK_FALSE;
-        sampler_create_info.compareOp               = static_cast<VkCompareOp>(m_create_info_ptr->get_compare_op() );
-        sampler_create_info.flags                   = 0;
-        sampler_create_info.magFilter               = static_cast<VkFilter>(m_create_info_ptr->get_mag_filter() );
-        sampler_create_info.maxAnisotropy           = max_anisotropy;
-        sampler_create_info.maxLod                  = m_create_info_ptr->get_max_lod();
-        sampler_create_info.minFilter               = static_cast<VkFilter>(m_create_info_ptr->get_min_filter() );
-        sampler_create_info.minLod                  = m_create_info_ptr->get_min_lod();
-        sampler_create_info.mipLodBias              = m_create_info_ptr->get_lod_bias();
-        sampler_create_info.mipmapMode              = static_cast<VkSamplerMipmapMode>(m_create_info_ptr->get_mipmap_mode() );
-        sampler_create_info.pNext                   = nullptr;
-        sampler_create_info.sType                   = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-        sampler_create_info.unnormalizedCoordinates = m_create_info_ptr->uses_unnormalized_coordinates() ? VK_TRUE : VK_FALSE;
-
-        struct_chainer.append_struct(sampler_create_info);
-    }
-
-    if (sampler_reduction_mode != Anvil::SamplerReductionMode::UNKNOWN)
-    {
-        VkSamplerReductionModeCreateInfoEXT srm_create_info;
-
-        srm_create_info.pNext         = nullptr;
-        srm_create_info.reductionMode = static_cast<VkSamplerReductionModeEXT>(sampler_reduction_mode);
-        srm_create_info.sType         = VK_STRUCTURE_TYPE_SAMPLER_REDUCTION_MODE_CREATE_INFO_EXT;
-
-        struct_chainer.append_struct(srm_create_info);
-    }
-
-    if (sampler_ycbcr_conversion_ptr != nullptr)
-    {
-        VkSamplerYcbcrConversionInfoKHR conversion_info;
-
-        conversion_info.conversion = sampler_ycbcr_conversion_ptr->get_sampler_ycbcr_conversion_vk();
-        conversion_info.pNext      = nullptr;
-        conversion_info.sType      = VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_INFO_KHR;
-
-        struct_chainer.append_struct(conversion_info);
-    }
-
-    {
-        auto chain_ptr = struct_chainer.create_chain();
-
-        result = Anvil::Vulkan::vkCreateSampler(m_device_ptr->get_device_vk(),
-                                                chain_ptr->get_root_struct(),
-                                                nullptr, /* pAllocator */
-                                               &m_sampler);
-    }
-
-    anvil_assert_vk_call_succeeded(result);
-    if (is_vk_call_successful(result) )
-    {
-        set_vk_handle(m_sampler);
-    }
-
-    /* All done */
-    return is_vk_call_successful(result);
+    Anvil::ObjectTracker::get()->unregister_object(Anvil::ObjectTracker::OBJECT_TYPE_SAMPLER,
+                                                    this);
 }

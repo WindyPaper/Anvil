@@ -1,5 +1,5 @@
 //
-// Copyright (c) 2017-2018 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2016 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -19,57 +19,19 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 //
+
 #ifndef MISC_TYPES_H
 #define MISC_TYPES_H
 
-#include <array>
-#include <atomic>
-#include <climits>
-#include <cstdio>
-#include <forward_list>
-#include <mutex>
-#include <string>
-
-#include "config.h"
-#include "misc/debug.h"
-
-/* Disable some of the warnings we cannot work around because they are caused
- * by external dependencies (ie. Vulkan header)
- */
-#ifdef _MSC_VER
-    #pragma warning(disable : 4063)
-#else
-    #pragma GCC diagnostic ignored "-Wswitch"
-    #pragma GCC diagnostic ignored "-Wreorder"
-    #pragma GCC diagnostic ignored "-Wunused-value"
-#endif
-
-/* Determine endianness */
-#if REG_DWORD == REG_DWORD_LITTLE_ENDIAN || __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
-    #define ANVIL_LITTLE_ENDIAN
-#endif
-
-/* The following #define is required to include Vulkan entry-point prototype declarations. */
+/* The following #define is required to include Vulkan entry-point prototypes. */
 #ifdef _WIN32
     #define VK_USE_PLATFORM_WIN32_KHR
 #else
-    #if defined(ANVIL_INCLUDE_XCB_WINDOW_SYSTEM_SUPPORT)
-        #define VK_USE_PLATFORM_XCB_KHR
-    #endif
+    #define VK_USE_PLATFORM_XCB_KHR
 #endif
 
+
 #ifdef _WIN32
-    /* NOTE: Version clamp required for IsDebuggerPresent() */
-    #define ANVIL_MIN_WIN32_WINNT_REQUIRED 0x0501
-
-    #if !defined(_WIN32_WINNT)
-        #define _WIN32_WINNT ANVIL_MIN_WIN32_WINNT_REQUIRED
-    #else
-        #if _WIN32_WINNT < ANVIL_MIN_WIN32_WINNT_REQUIRED
-            #error Please update the _WIN32_WINNT macro in order for Anvil to compile successfully.
-        #endif
-    #endif
-
     #if _MSC_VER <= 1800
         #ifndef snprintf
             #define snprintf _snprintf
@@ -78,178 +40,516 @@
 
     #include <windows.h>
 
-    #if defined(ANVIL_INCLUDE_WIN3264_WINDOW_SYSTEM_SUPPORT)
-        typedef HWND WindowHandle;
-    #else
-        typedef void* WindowHandle;
-    #endif
+    typedef HWND WindowHandle;
 #else
-    #if defined(ANVIL_INCLUDE_XCB_WINDOW_SYSTEM_SUPPORT)
-        #include "xcb_loader.h"
+    #include "xcb_loader_for_anvil.h"
+    #include <string.h>
 
-        typedef xcb_window_t WindowHandle;
-    #else
-        typedef void* WindowHandle;
+    #ifndef nullptr
+        #define nullptr NULL
     #endif
 
-    #include <string.h>
+    typedef xcb_window_t WindowHandle;
 #endif
 
-#include "misc/vulkan.h"
-#include "vulkan/vk_platform.h"
+#ifdef _WIN32
+    #include "vulkan\vulkan.h"
+    #include "vulkan\vk_sdk_platform.h"
+#else
+    #include "vulkan/vulkan.h"
+    #include "vulkan/vk_sdk_platform.h"
+#endif
+
 
 #include <map>
-#include <memory>
 #include <vector>
 
-/* Forward declarations */
+/* Defines various enums used by Vulkan API wrapper classes. */
 namespace Anvil
 {
-    class  BaseDevice;
-    class  BasePipelineCreateInfo;
+    /* Forward declarations */
     class  Buffer;
-    class  BufferCreateInfo;
     class  BufferView;
-    class  BufferViewCreateInfo;
-    struct CallbackArgument;
     class  CommandBufferBase;
     class  CommandPool;
-    class  ComputePipelineCreateInfo;
     class  ComputePipelineManager;
-    class  DebugMessenger;
-    class  DebugMessengerCreateInfo;
+    class  DAGRenderer;
     class  DescriptorPool;
-    class  DescriptorPoolCreateInfo;
     class  DescriptorSet;
-    class  DescriptorSetCreateInfo;
     class  DescriptorSetGroup;
     class  DescriptorSetLayout;
-    class  DescriptorSetLayoutManager;
-    class  DescriptorUpdateTemplate;
-    class  DeviceCreateInfo;
-    class  ExternalHandle;
+    class  Device;
     class  Event;
-    class  EventCreateInfo;
     class  Fence;
-    class  FenceCreateInfo;
     class  Framebuffer;
-    class  FramebufferCreateInfo;
-    class  GLSLShaderToSPIRVGenerator;
-    class  GraphicsPipelineCreateInfo;
     class  GraphicsPipelineManager;
     class  Image;
-    class  ImageCreateInfo;
     class  ImageView;
-    class  ImageViewCreateInfo;
     class  Instance;
-    class  InstanceCreateInfo;
     class  MemoryAllocator;
     class  MemoryBlock;
-    class  MemoryBlockCreateInfo;
     struct MemoryHeap;
     struct MemoryProperties;
     struct MemoryType;
-    class  MGPUDevice;
     class  PhysicalDevice;
     class  PipelineCache;
     class  PipelineLayout;
     class  PipelineLayoutManager;
     class  PrimaryCommandBuffer;
+    class  PrimaryCommandBufferPool;
     class  QueryPool;
     class  Queue;
     class  RenderingSurface;
-    class  RenderingSurfaceCreateInfo;
     class  RenderPass;
-    class  RenderPassCreateInfo;
     class  Sampler;
-    class  SamplerCreateInfo;
-    class  SamplerYCbCrConversion;
-    class  SamplerYCbCrConversionCreateInfo;
     class  SecondaryCommandBuffer;
+    class  SecondaryCommandBufferPool;
     class  Semaphore;
-    class  SemaphoreCreateInfo;
-    class  SGPUDevice;
     class  ShaderModule;
-    class  ShaderModuleCache;
     class  Swapchain;
-    class  SwapchainCreateInfo;
     class  Window;
 
-    typedef std::unique_ptr<BaseDevice,                            std::function<void(BaseDevice*)> >                  BaseDeviceUniquePtr;
-    typedef std::unique_ptr<BasePipelineCreateInfo>                                                                    BasePipelineCreateInfoUniquePtr;
-    typedef std::unique_ptr<BufferCreateInfo>                                                                          BufferCreateInfoUniquePtr;
-    typedef std::unique_ptr<Buffer,                                std::function<void(Buffer*)> >                      BufferUniquePtr;
-    typedef std::unique_ptr<BufferViewCreateInfo>                                                                      BufferViewCreateInfoUniquePtr;
-    typedef std::unique_ptr<BufferView,                            std::function<void(BufferView*)> >                  BufferViewUniquePtr;
-    typedef std::unique_ptr<CommandBufferBase,                     std::function<void(CommandBufferBase*)> >           CommandBufferBaseUniquePtr;
-    typedef std::unique_ptr<CommandPool,                           std::function<void(CommandPool*)> >                 CommandPoolUniquePtr;
-    typedef std::unique_ptr<ComputePipelineCreateInfo>                                                                 ComputePipelineCreateInfoUniquePtr;
-    typedef std::unique_ptr<DebugMessengerCreateInfo>                                                                  DebugMessengerCreateInfoUniquePtr;
-    typedef std::unique_ptr<DebugMessenger,                        std::function<void(DebugMessenger*)> >              DebugMessengerUniquePtr;
-    typedef std::unique_ptr<DescriptorPoolCreateInfo>                                                                  DescriptorPoolCreateInfoUniquePtr;
-    typedef std::unique_ptr<DescriptorPool,                        std::function<void(DescriptorPool*)> >              DescriptorPoolUniquePtr;
-    typedef std::unique_ptr<DescriptorSetCreateInfo>                                                                   DescriptorSetCreateInfoUniquePtr;
-    typedef std::unique_ptr<DescriptorSetGroup,                    std::function<void(DescriptorSetGroup*)> >          DescriptorSetGroupUniquePtr;
-    typedef std::unique_ptr<DescriptorSetLayout,                   std::function<void(DescriptorSetLayout*)> >         DescriptorSetLayoutUniquePtr;
-    typedef std::unique_ptr<DescriptorSetLayoutManager,            std::function<void(DescriptorSetLayoutManager*)> >  DescriptorSetLayoutManagerUniquePtr;
-    typedef std::unique_ptr<DescriptorSet,                         std::function<void(DescriptorSet*)> >               DescriptorSetUniquePtr;
-    typedef std::unique_ptr<DescriptorUpdateTemplate,              std::function<void(DescriptorUpdateTemplate*)> >    DescriptorUpdateTemplateUniquePtr;
-    typedef std::unique_ptr<DeviceCreateInfo>                                                                          DeviceCreateInfoUniquePtr;
-    typedef std::unique_ptr<ExternalHandle,                        std::function<void(ExternalHandle*)> >              ExternalHandleUniquePtr;
-    typedef std::unique_ptr<EventCreateInfo>                                                                           EventCreateInfoUniquePtr;
-    typedef std::unique_ptr<Event,                                 std::function<void(Event*)> >                       EventUniquePtr;
-    typedef std::unique_ptr<FenceCreateInfo>                                                                           FenceCreateInfoUniquePtr;
-    typedef std::unique_ptr<Fence,                                 std::function<void(Fence*)> >                       FenceUniquePtr;
-    typedef std::unique_ptr<FramebufferCreateInfo>                                                                     FramebufferCreateInfoUniquePtr;
-    typedef std::unique_ptr<Framebuffer,                           std::function<void(Framebuffer*)> >                 FramebufferUniquePtr;
-    typedef std::unique_ptr<GLSLShaderToSPIRVGenerator,            std::function<void(GLSLShaderToSPIRVGenerator*)> >  GLSLShaderToSPIRVGeneratorUniquePtr;
-    typedef std::unique_ptr<GraphicsPipelineCreateInfo>                                                                GraphicsPipelineCreateInfoUniquePtr;
-    typedef std::unique_ptr<GraphicsPipelineManager>                                                                   GraphicsPipelineManagerUniquePtr;
-    typedef std::unique_ptr<ImageCreateInfo>                                                                           ImageCreateInfoUniquePtr;
-    typedef std::unique_ptr<Image,                                 std::function<void(Image*)> >                       ImageUniquePtr;
-    typedef std::unique_ptr<ImageViewCreateInfo>                                                                       ImageViewCreateInfoUniquePtr;
-    typedef std::unique_ptr<ImageView,                             std::function<void(ImageView*)> >                   ImageViewUniquePtr;
-    typedef std::unique_ptr<InstanceCreateInfo>                                                                        InstanceCreateInfoUniquePtr;
-    typedef std::unique_ptr<Instance,                              std::function<void(Instance*)> >                    InstanceUniquePtr;
-    typedef std::unique_ptr<MemoryAllocator,                       std::function<void(MemoryAllocator*)> >             MemoryAllocatorUniquePtr;
-    typedef std::unique_ptr<MemoryBlockCreateInfo>                                                                     MemoryBlockCreateInfoUniquePtr;
-    typedef std::unique_ptr<MemoryBlock,                           std::function<void(MemoryBlock*)> >                 MemoryBlockUniquePtr;
-    typedef std::unique_ptr<MGPUDevice,                            std::function<void(MGPUDevice*)> >                  MGPUDeviceUniquePtr;
-    typedef std::unique_ptr<PipelineCache,                         std::function<void(PipelineCache*)> >               PipelineCacheUniquePtr;
-    typedef std::unique_ptr<PipelineLayoutManager,                 std::function<void(PipelineLayoutManager*)> >       PipelineLayoutManagerUniquePtr;
-    typedef std::unique_ptr<PipelineLayout,                        std::function<void(PipelineLayout*)> >              PipelineLayoutUniquePtr;
-    typedef std::unique_ptr<PrimaryCommandBuffer,                  std::function<void(PrimaryCommandBuffer*)> >        PrimaryCommandBufferUniquePtr;
-    typedef std::unique_ptr<QueryPool,                             std::function<void(QueryPool*)> >                   QueryPoolUniquePtr;
-    typedef std::unique_ptr<RenderingSurface,                      std::function<void(RenderingSurface*)> >            RenderingSurfaceUniquePtr;
-    typedef std::unique_ptr<RenderingSurfaceCreateInfo>                                                                RenderingSurfaceCreateInfoUniquePtr;
-    typedef std::unique_ptr<RenderPassCreateInfo>                                                                      RenderPassCreateInfoUniquePtr;
-    typedef std::unique_ptr<RenderPass,                            std::function<void(RenderPass*)> >                  RenderPassUniquePtr;
-    typedef std::unique_ptr<SamplerCreateInfo>                                                                         SamplerCreateInfoUniquePtr;
-    typedef std::unique_ptr<Sampler,                               std::function<void(Sampler*)> >                     SamplerUniquePtr;
-    typedef std::unique_ptr<SamplerYCbCrConversionCreateInfo>                                                          SamplerYCbCrConversionCreateInfoUniquePtr;
-    typedef std::unique_ptr<SamplerYCbCrConversion,                std::function<void(SamplerYCbCrConversion*)> >      SamplerYCbCrConversionUniquePtr;
-    typedef std::unique_ptr<SecondaryCommandBuffer,                std::function<void(SecondaryCommandBuffer*)> >      SecondaryCommandBufferUniquePtr;
-    typedef std::unique_ptr<SemaphoreCreateInfo>                                                                       SemaphoreCreateInfoUniquePtr;
-    typedef std::unique_ptr<Semaphore,                             std::function<void(Semaphore*)> >                   SemaphoreUniquePtr;
-    typedef std::unique_ptr<SGPUDevice,                            std::function<void(SGPUDevice*)> >                  SGPUDeviceUniquePtr;
-    typedef std::unique_ptr<ShaderModuleCache,                     std::function<void(ShaderModuleCache*)> >           ShaderModuleCacheUniquePtr;
-    typedef std::unique_ptr<ShaderModule,                          std::function<void(ShaderModule*)> >                ShaderModuleUniquePtr;
-    typedef std::unique_ptr<SwapchainCreateInfo>                                                                       SwapchainCreateInfoUniquePtr;
-    typedef std::unique_ptr<Swapchain,                             std::function<void(Swapchain*)> >                   SwapchainUniquePtr;
-    typedef std::unique_ptr<Window,                                std::function<void(Window*)> >                      WindowUniquePtr;
-};
+    /** Describes a buffer memory barrier. */
+    typedef struct BufferBarrier
+    {
+        VkBuffer              buffer;
+        VkBufferMemoryBarrier buffer_barrier_vk;
+        Anvil::Buffer*       buffer_ptr;
+        VkAccessFlagBits      dst_access_mask;
+        uint32_t              dst_queue_family_index;
+        VkDeviceSize          offset;
+        VkDeviceSize          size;
+        VkAccessFlagBits      src_access_mask;
+        uint32_t              src_queue_family_index;
 
-/* Defines various types used by Vulkan API wrapper classes. */
-namespace Anvil
-{
-    #if defined(_WIN32)
-        typedef HANDLE ExternalHandleType;
-    #else
-        typedef int ExternalHandleType;
-    #endif
+        /** Constructor.
+         *
+         *  Note that @param buffer_ptr is retained by this function.
+         *
+         *  @param in_source_access_mask      Source access mask to use for the barrier.
+         *  @param in_destination_access_mask Destination access mask to use for the barrier.
+         *  @param in_src_queue_family_index  Source queue family index to use for the barrier.
+         *  @param in_dst_queue_family_index  Destination queue family index to use for the barrier.
+         *  @param in_buffer_ptr              Pointer to a Buffer instance the instantiated barrier
+         *                                    refers to. Must not be nullptr.
+         *                                    The object will be retained.
+         *  @param in_offset                  Start offset of the region described by the barrier.
+         *  @param in_size                    Size of the region described by the barrier.
+         **/
+        explicit BufferBarrier(VkAccessFlags  in_source_access_mask,
+                               VkAccessFlags  in_destination_access_mask,
+                               uint32_t       in_src_queue_family_index,
+                               uint32_t       in_dst_queue_family_index,
+                               Anvil::Buffer* in_buffer_ptr,
+                               VkDeviceSize   in_offset,
+                               VkDeviceSize   in_size);
+
+        /** Destructor.
+         *
+         *  Releases the encapsulated Buffer instance.
+         **/
+        virtual ~BufferBarrier();
+
+        /** Copy constructor.
+         *
+         *  Retains the Buffer instance stored in the input barrier.
+         *
+         *  @param in Barrier instance to copy data from.
+         **/
+        BufferBarrier(const BufferBarrier& in);
+
+        /** Returns a Vulkan buffer memory barrier descriptor, whose configuration corresponds to
+         *  to the configuration of this descriptor.
+         **/
+        virtual VkBufferMemoryBarrier get_barrier_vk() const
+        {
+            return buffer_barrier_vk;
+        }
+
+        /** Returns a pointer to the Vulkan descriptor, whose configuration corresponds to
+         *  the configuration of this descriptor.
+         *
+         *  The returned pointer remains valid for the duration of the Barrier descriptor's
+         *  life-time.
+         **/
+        const VkBufferMemoryBarrier* get_barrier_vk_ptr() const
+        {
+            return &buffer_barrier_vk;
+        }
+
+    private:
+        BufferBarrier& operator=(const BufferBarrier&);
+    } BufferBarrier;
+
+    /** Describes component layout of a format */
+    typedef enum
+    {
+        /* NOTE: If the ordering used below needs to be changed, make sure to also update formats.cpp::layout_to_n_components */
+        COMPONENT_LAYOUT_ABGR,
+        COMPONENT_LAYOUT_ARGB,
+        COMPONENT_LAYOUT_BGR,
+        COMPONENT_LAYOUT_BGRA,
+        COMPONENT_LAYOUT_D,
+        COMPONENT_LAYOUT_DS,
+        COMPONENT_LAYOUT_EBGR,
+        COMPONENT_LAYOUT_R,
+        COMPONENT_LAYOUT_RG,
+        COMPONENT_LAYOUT_RGB,
+        COMPONENT_LAYOUT_RGBA,
+        COMPONENT_LAYOUT_S,
+        COMPONENT_LAYOUT_XD,
+
+        COMPONENT_LAYOUT_UNKNOWN
+    } ComponentLayout;
+
+    /** Holds properties of a single Vulkan Extension */
+    typedef struct Extension
+    {
+        std::string name;
+        uint32_t    version;
+
+        /** Constructor. Initializes the instance using data provided by the driver.
+         *
+         *  @param extension_props Vulkan structure to use for initialization.
+         **/
+        explicit Extension(const VkExtensionProperties& extension_props)
+        {
+            name    = extension_props.extensionName;
+            version = extension_props.specVersion;
+        }
+
+        /** Returns true if @param extension_name matches the extension described by the instance. */
+        bool operator==(const std::string& extension_name) const
+        {
+            return name == extension_name;
+        }
+    } Extension;
+
+    typedef std::vector<Extension> Extensions;
+
+    /** Holds driver-specific format capabilities */
+    typedef struct FormatProperties
+    {
+        VkFormatFeatureFlagBits buffer_capabilities;
+        VkFormatFeatureFlagBits linear_tiling_capabilities;
+        VkFormatFeatureFlagBits optimal_tiling_capabilities;
+
+        /** Dummy constructor */
+        FormatProperties()
+        {
+            memset(this,
+                   0,
+                   sizeof(*this) );
+        }
+
+        /** Constructor. Initializes the instance using data provided by the driver.
+         *
+         *  @param format_props Vulkan structure to use for initialization.
+         **/
+        FormatProperties(const VkFormatProperties& format_props)
+        {
+            buffer_capabilities         = static_cast<VkFormatFeatureFlagBits>(format_props.bufferFeatures);
+            linear_tiling_capabilities  = static_cast<VkFormatFeatureFlagBits>(format_props.linearTilingFeatures);
+            optimal_tiling_capabilities = static_cast<VkFormatFeatureFlagBits>(format_props.optimalTilingFeatures);
+        }
+    } FormatProperties;
+
+    typedef enum
+    {
+        FORMAT_TYPE_SFLOAT,
+        FORMAT_TYPE_SFLOAT_UINT,
+        FORMAT_TYPE_SINT,
+        FORMAT_TYPE_SNORM,
+        FORMAT_TYPE_SRGB,
+        FORMAT_TYPE_SSCALED,
+        FORMAT_TYPE_UFLOAT,
+        FORMAT_TYPE_UINT,
+        FORMAT_TYPE_UNORM,
+        FORMAT_TYPE_UNORM_UINT,
+        FORMAT_TYPE_USCALED,
+
+        FORMAT_TYPE_UNKNOWN,
+    } FormatType;
 
     /** ID of an Anvil framebuffer's attachment */
     typedef uint32_t FramebufferAttachmentID;
+
+    /** Describes an image memory barrier. */
+    typedef struct ImageBarrier
+    {
+        bool                    by_region;
+        VkAccessFlagBits        dst_access_mask;
+        uint32_t                dst_queue_family_index;
+        VkImage                 image;
+        VkImageMemoryBarrier    image_barrier_vk;
+        Anvil::Image*           image_ptr;
+        VkImageLayout           new_layout;
+        VkImageLayout           old_layout;
+        VkAccessFlagBits        src_access_mask;
+        uint32_t                src_queue_family_index;
+        VkImageSubresourceRange subresource_range;
+
+        /** Constructor.
+         *
+         *  Note that @param image_ptr is retained by this function.
+         *
+         *  @param in_source_access_mask      Source access mask to use for the barrier.
+         *  @param in_destination_access_mask Destination access mask to use for the barrier.
+         *  @param in_by_region_barrier       true if this is a by-region barrier.
+         *  @param in_old_layout              Old layout of @param in_image_ptr to use for the barrier.
+         *  @param in_new_layout              New layout of @param in_image_ptr to use for the barrier.
+         *  @param in_src_queue_family_index  Source queue family index to use for the barrier.
+         *  @param in_dst_queue_family_index  Destination queue family index to use for the barrier.
+         *  @param in_image_ptr               Image instance the barrier refers to. May be nullptr, in which case
+         *                                    "image" and "image_ptr" fields will be set to nullptr.
+         *                                    The instance will be retained by this function.
+         *  @param in_image_subresource_range Subresource range to use for the barrier.
+         *
+         **/
+        ImageBarrier(VkAccessFlags           in_source_access_mask,
+                     VkAccessFlags           in_destination_access_mask,
+                     bool                    in_by_region_barrier,
+                     VkImageLayout           in_old_layout,
+                     VkImageLayout           in_new_layout,
+                     uint32_t                in_src_queue_family_index,
+                     uint32_t                in_dst_queue_family_index,
+                     Anvil::Image*           in_image_ptr,
+                     VkImageSubresourceRange in_image_subresource_range);
+
+        /** Destructor.
+         *
+         *  Releases the encapsulated Image instance.
+         **/
+       virtual ~ImageBarrier();
+
+       /** Copy constructor.
+         *
+         *  Retains the Image instance stored in the input barrier.
+         *
+         *  @param in Barrier instance to copy data from.
+         **/
+       ImageBarrier(const ImageBarrier& in);
+
+       /** Returns a Vulkan memory barrier descriptor, whose configuration corresponds to
+         *  to the configuration of this descriptor.
+         **/
+       virtual VkImageMemoryBarrier get_barrier_vk() const
+       {
+           return image_barrier_vk;
+       }
+
+       /** Returns a pointer to the Vulkan descriptor, whose configuration corresponds to
+         *  the configuration of this descriptor.
+         *
+         *  The returned pointer remains valid for the duration of the Barrier descriptor's
+         *  life-time.
+         **/
+       const VkImageMemoryBarrier* get_barrier_vk_ptr() const
+       {
+           return &image_barrier_vk;
+       }
+
+    private:
+        ImageBarrier& operator=(const ImageBarrier&);
+    } ImageBarrier;
+
+    /** Holds properties of a single Vulkan Layer. */
+    typedef struct Layer
+    {
+        std::string            description;
+        std::vector<Extension> extensions;
+        uint32_t               implementation_version;
+        std::string            name;
+        uint32_t               spec_version;
+
+        /** Dummy constructor.
+         *
+         *  @param layer_name Name to use for the layer.
+         **/
+        Layer(const std::string& layer_name)
+        {
+            implementation_version = 0;
+            name                   = layer_name;
+            spec_version           = 0;
+        }
+
+        /** Constructor. Initializes the instance using data provided by the driver.
+         *
+         *  @param layer_props Vulkan structure to use for initialization.
+         **/
+        Layer(const VkLayerProperties& layer_props)
+        {
+            description            = layer_props.description;
+            implementation_version = layer_props.implementationVersion;
+            name                   = layer_props.layerName;
+            spec_version           = layer_props.specVersion;
+        }
+
+        /** Returns true if @param layer_name matches the layer name described by the instance. */
+        bool operator==(const std::string& layer_name) const
+        {
+            return name == layer_name;
+        }
+    } Layer;
+
+    typedef std::vector<Layer> Layers;
+
+    /** Describes a Vulkan memory barrier. */
+    typedef struct MemoryBarrier
+    {
+        VkAccessFlagBits destination_access_mask;
+        VkMemoryBarrier  memory_barrier_vk;
+        VkAccessFlagBits source_access_mask;
+
+        /** Constructor.
+         *
+         *  @param in_source_access_mask      Source access mask of the Vulkan memory barrier.
+         *  @param in_destination_access_mask Destination access mask of the Vulkan memory barrier.
+         *
+         **/
+        explicit MemoryBarrier(VkAccessFlags in_destination_access_mask,
+                               VkAccessFlags in_source_access_mask)
+        {
+            destination_access_mask = static_cast<VkAccessFlagBits>(in_destination_access_mask);
+            source_access_mask      = static_cast<VkAccessFlagBits>(in_source_access_mask);
+
+            memory_barrier_vk.dstAccessMask = destination_access_mask;
+            memory_barrier_vk.pNext         = nullptr;
+            memory_barrier_vk.srcAccessMask = source_access_mask;
+            memory_barrier_vk.sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+        }
+
+        /** Destructor. */
+        virtual ~MemoryBarrier()
+        {
+            /* Stub */
+        }
+
+        /** Returns a Vulkan memory barrier descriptor, whose configuration corresponds to
+         *  to the configuration of this descriptor.
+         **/
+        virtual VkMemoryBarrier get_barrier_vk() const
+        {
+            return memory_barrier_vk;
+        }
+
+        /** Returns a pointer to the Vulkan descriptor, whose configuration corresponds to
+         *  the configuration of this descriptor.
+         *
+         *  The returned pointer remains valid for the duration of the Barrier descriptor's
+         *  life-time.
+         **/
+        virtual const VkMemoryBarrier* get_barrier_vk_ptr() const
+        {
+            return &memory_barrier_vk;
+        }
+    } MemoryBarrier;
+
+    /** Holds properties of a single Vulkan Memory Heap. */
+    typedef struct MemoryHeap
+    {
+        VkMemoryHeapFlagBits flags;
+        VkDeviceSize         size;
+
+        /** Stub constructor */
+        MemoryHeap()
+        {
+            flags = static_cast<VkMemoryHeapFlagBits>(0);
+            size  = 0;
+        }
+    } MemoryHeap;
+
+    typedef std::vector<MemoryHeap> MemoryHeaps;
+
+    /** Holds properties of a single Vulkan Memory Type. */
+    typedef struct MemoryType
+    {
+        MemoryHeap*              heap_ptr;
+        VkMemoryPropertyFlagBits flags;
+
+        /** Constructor. Initializes the instance using data provided by the driver.
+         *
+         *  @param type             Vulkan structure to use for initialization.
+         *  @param memory_props_ptr Used to initialize the MemoryHeap pointer member. Must not be nullptr.
+         **/
+        explicit MemoryType(const VkMemoryType&      type,
+                            struct MemoryProperties* memory_props_ptr);
+    } MemoryType;
+
+    typedef std::vector<MemoryType> MemoryTypes;
+
+    /** Holds information about available memory heaps & types for a specific physical device. */
+    typedef struct MemoryProperties
+    {
+        MemoryHeap* heaps;
+        MemoryTypes types;
+
+        MemoryProperties()
+        {
+            heaps = nullptr;
+        }
+
+        /** Destructor */
+        ~MemoryProperties()
+        {
+            if (heaps != nullptr)
+            {
+                delete heaps;
+
+                heaps = nullptr;
+            }
+        }
+
+        /** Constructor. Initializes the instance using data provided by the driver.
+         *
+         *  @param mem_properties Vulkan structure to use for initialization.
+         **/
+        void init(const VkPhysicalDeviceMemoryProperties& mem_properties);
+
+    private:
+        MemoryProperties           (const MemoryProperties&);
+        MemoryProperties& operator=(const MemoryProperties&);
+    } MemoryProperties;
+
+    /* Dummy delete functor */
+    template<class Type>
+    struct NullDeleter
+    {
+        void operator()(Type* unused_ptr)
+        {
+            unused_ptr;
+        }
+    };
+
+    /* A single push constant range descriptor */
+    typedef struct PushConstantRange
+    {
+        uint32_t              offset;
+        uint32_t              size;
+        VkShaderStageFlagBits stages;
+
+        /** Constructor
+         *
+         *  @param in_offset Start offset for the range.
+         *  @param in_size   Size of the range.
+         *  @param in_stages Valid pipeline stages for the range.
+         */
+        PushConstantRange(uint32_t           in_offset,
+                          uint32_t           in_size,
+                          VkShaderStageFlags in_stages)
+        {
+            offset = in_offset;
+            size   = in_size;
+            stages = static_cast<VkShaderStageFlagBits>(in_stages);
+        }
+
+        /** Comparison operator. Used internally. */
+        bool operator==(const PushConstantRange& in) const
+        {
+            return (offset == in.offset &&
+                    size   == in.size);
+        }
+    } PushConstantRange;
 
     typedef uint32_t            BindingElementIndex;
     typedef uint32_t            BindingIndex;
@@ -258,11 +558,78 @@ namespace Anvil
 
     typedef std::pair<StartBindingElementIndex, NumberOfBindingElements> BindingElementArrayRange;
 
-    /** "About to be deleted" call-back function prototype. */
-    typedef std::function<void (Anvil::MemoryBlock* in_memory_block_ptr)> OnMemoryBlockReleaseCallbackFunction;
+    typedef std::vector<Anvil::DescriptorSetGroup*> DescriptorSetGroups;
+    typedef std::vector<PushConstantRange>          PushConstantRanges;
+
+    /** Holds information about a single Vulkan Queue Family. */
+    typedef struct QueueFamilyInfo
+    {
+        VkQueueFlagBits flags;
+        VkExtent3D      min_image_transfer_granularity;
+        uint32_t        n_queues;
+        uint32_t        n_timestamp_bits;
+
+        /** Constructor. Initializes the instance using data provided by the driver.
+         *
+         *  @param props Vulkan structure to use for initialization.
+         **/
+        explicit QueueFamilyInfo(const VkQueueFamilyProperties& props)
+        {
+            flags                          = static_cast<VkQueueFlagBits>(props.queueFlags);
+            min_image_transfer_granularity = props.minImageTransferGranularity;
+            n_queues                       = props.queueCount;
+            n_timestamp_bits               = props.timestampValidBits;
+        }
+    } QueueFamilyInfo;
+
+    typedef std::vector<QueueFamilyInfo> QueueFamilyInfoItems;
+
+    /** Enumerates all available queue family types */
+    typedef enum
+    {
+        QUEUE_FAMILY_TYPE_COMPUTE,
+        QUEUE_FAMILY_TYPE_TRANSFER,
+        QUEUE_FAMILY_TYPE_UNIVERSAL, /* compute + queue */
+
+        /* Always last */
+        QUEUE_FAMILY_TYPE_COUNT,
+        QUEUE_FAMILY_TYPE_FIRST     = QUEUE_FAMILY_TYPE_COMPUTE,
+        QUEUE_FAMILY_TYPE_UNDEFINED = QUEUE_FAMILY_TYPE_COUNT
+    } QueueFamilyType;
+
+    /* Keyboard character IDs */
+    #ifdef _WIN32
+        #define ANVIL_KEY_HELPER(key) VK_##key
+    #else
+        #define ANVIL_KEY_HELPER(key) XK_##key
+    #endif
+
+    typedef enum
+    {
+#ifdef _WIN32
+        KEY_ID_ESCAPE = ANVIL_KEY_HELPER(ESCAPE),
+        KEY_ID_LEFT   = ANVIL_KEY_HELPER(LEFT),
+        KEY_ID_RETURN = ANVIL_KEY_HELPER(RETURN),
+        KEY_ID_RIGHT  = ANVIL_KEY_HELPER(RIGHT),
+        KEY_ID_SPACE  = ANVIL_KEY_HELPER(SPACE)
+#else
+        KEY_ID_ESCAPE = ANVIL_KEY_HELPER(Escape),
+        KEY_ID_LEFT   = ANVIL_KEY_HELPER(Left),
+        KEY_ID_RETURN = ANVIL_KEY_HELPER(Return),
+        KEY_ID_RIGHT  = ANVIL_KEY_HELPER(Right),
+        KEY_ID_SPACE  = ANVIL_KEY_HELPER(space)
+#endif
+    } KeyID;
 
     /** Base pipeline ID. Internal type, used to represent compute / graphics pipeline IDs */
     typedef uint32_t PipelineID;
+
+    /** Compute Pipeline ID */
+    typedef PipelineID ComputePipelineID;
+
+    /** Graphics Pipeline ID */
+    typedef PipelineID GraphicsPipelineID;
+
 
     /* Index of a query within parent query pool instance */
     typedef uint32_t QueryIndex;
@@ -270,21 +637,84 @@ namespace Anvil
     /* Unique ID of a render-pass attachment within scope of a RenderPass instance. */
     typedef uint32_t RenderPassAttachmentID;
 
-    /* Unique ID of a sparse memory bind update */
-    typedef uint32_t SparseMemoryBindInfoID;
+    /* Specifies one of the compute / rendering pipeline stages. */
+    typedef enum
+    {
+        SHADER_STAGE_COMPUTE,
+        SHADER_STAGE_FRAGMENT,
+        SHADER_STAGE_GEOMETRY,
+        SHADER_STAGE_TESSELLATION_CONTROL,
+        SHADER_STAGE_TESSELLATION_EVALUATION,
+        SHADER_STAGE_VERTEX,
+
+        SHADER_STAGE_COUNT,
+        SHADER_STAGE_UNKNOWN = SHADER_STAGE_COUNT
+    } ShaderStage;
+
+    /** Holds all information related to a specific shader module stage entry-point. */
+    typedef struct ShaderModuleStageEntryPoint
+    {
+        const char*          name;
+        Anvil::ShaderModule* shader_module_ptr;
+        Anvil::ShaderStage   stage;
+
+        /** Dummy constructor */
+        ShaderModuleStageEntryPoint();
+
+        /** Copy constructor. */
+        ShaderModuleStageEntryPoint(const ShaderModuleStageEntryPoint& in);
+
+        /** Constructor.
+         *
+         *  @param in_name              Entry-point name. Must not be nullptr.
+         *  @param in_shader_module_ptr ShaderModule instance to use. Will be retained.
+         *  @param in_stage             Shader stage the entry-point implements.
+         */
+        ShaderModuleStageEntryPoint(const char*   in_name,
+                                    ShaderModule* in_shader_module_ptr,
+                                    ShaderStage   in_stage);
+
+        /** Destructor. */
+        ~ShaderModuleStageEntryPoint();
+
+        ShaderModuleStageEntryPoint& operator=(const ShaderModuleStageEntryPoint&);
+    } ShaderModuleStageEntryPoint;
 
     /* Unique ID of a render-pass' sub-pass attachment within scope of a RenderPass instance. */
     typedef uint32_t SubPassAttachmentID;
 
     /* Unique ID of a sub-pass within scope of a RenderPass instance. */
     typedef uint32_t SubPassID;
-};
 
-#include "misc/types_enums.h"
-#include "misc/types_macro.h"
+    /** Defines supported timestamp capture modes. */
+    typedef enum
+    {
+        /* No timestamps should be captured */
+        TIMESTAMP_CAPTURE_MODE_DISABLED,
 
-#include "misc/types_classes.h"
-#include "misc/types_struct.h"
-#include "misc/types_utils.h"
+        /* Two timestamps should be captured:
+         *
+         * 1. top-of-pipe timestamp, preceding actual commands.
+         * 2. tof-of-pipe timestamp, after all commands are recorded.
+         */
+        TIMESTAMP_CAPTURE_MODE_ENABLED_COMMAND_SUBMISSION_TIME,
+
+        /* Two timestamps should be captured:
+        *
+        * 1. top-of-pipe timestamp, preceding actual commands.
+        * 2. bottom-of-pipe timestamp, after all commands are recorded.
+        */
+        TIMESTAMP_CAPTURE_MODE_ENABLED_COMMAND_EXECUTION_TIME
+    } TimestampCaptureMode;
+
+    /** A bitmask defining one or more queue family usage.*/
+    typedef enum
+    {
+        QUEUE_FAMILY_COMPUTE_BIT  = 1 << 0,
+        QUEUE_FAMILY_DMA_BIT      = 1 << 1,
+        QUEUE_FAMILY_GRAPHICS_BIT = 1 << 2 
+    } QueueFamily;
+    typedef int QueueFamilyBits;
+}; /* Vulkan namespace */
 
 #endif /* MISC_TYPES_H */
